@@ -1,14 +1,154 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 import uuid
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+
 from ...schema.schemas import (
     CaseCreateSchema, 
     EvidenceSubmissionSchema, 
-    LawyerType
+    LawyerType,
+    CaseStatus
 )
 from ...db.redis_db import redis_client
 
 router = APIRouter()
+
+def generate_case_pdf(case: dict) -> str:
+    """
+    Generate a PDF report for a specific case
+    
+    Args:
+        case (dict): Case object containing all case details
+    
+    Returns:
+        str: Path to the generated PDF file
+    """
+    # Ensure PDF directory exists
+    os.makedirs('case_reports', exist_ok=True)
+    
+    # Generate unique filename
+    pdf_filename = f'case_reports/case_{case["case_id"]}.pdf'
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(pdf_filename, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    title = Paragraph(f"Case Report: {case['title']}", styles['Title'])
+    story.append(title)
+    story.append(Spacer(1, 12))
+
+    # Case Details Section
+    story.append(Paragraph("Case Details:", styles['Heading2']))
+    case_details = [
+        ['Case ID', case['case_id']],
+        ['Description', case['description']],
+        ['Status', case['case_status']],
+        ['Created At', case['created_at']],
+        ['Updated At', case['updated_at']]
+    ]
+    case_details_table = Table(case_details, colWidths=[2*inch, 4*inch])
+    case_details_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.grey),
+        ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('BACKGROUND', (0,0), (-1,0), colors.beige),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
+    ]))
+    story.append(case_details_table)
+    story.append(Spacer(1, 12))
+
+    # Lawyer 1 Section
+    story.append(Paragraph("Lawyer 1 Details:", styles['Heading2']))
+    lawyer1_details = [
+        ['Lawyer Type', case['lawyer1_type']],
+        ['Lawyer Address', case['lawyer1_address']]
+    ]
+    lawyer1_table = Table(lawyer1_details, colWidths=[2*inch, 4*inch])
+    lawyer1_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.grey),
+        ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
+    ]))
+    story.append(lawyer1_table)
+    story.append(Spacer(1, 12))
+
+    # Lawyer 1 Evidence
+    story.append(Paragraph("Lawyer 1 Evidence:", styles['Heading3']))
+    lawyer1_evidence_data = [['IPFS Hash', 'Description', 'Original Name', 'Submitted At']]
+    for evidence in case.get('lawyer1_evidences', []):
+        lawyer1_evidence_data.append([
+            evidence['ipfs_hash'], 
+            evidence['description'], 
+            evidence['original_name'],
+            evidence['submitted_at']
+        ])
+    lawyer1_evidence_table = Table(lawyer1_evidence_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+    lawyer1_evidence_table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.beige),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,-1), 10),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
+    ]))
+    story.append(lawyer1_evidence_table)
+    story.append(Spacer(1, 12))
+
+    # Lawyer 2 Section (if exists)
+    if case['lawyer2_type']:
+        story.append(Paragraph("Lawyer 2 Details:", styles['Heading2']))
+        lawyer2_details = [
+            ['Lawyer Type', case['lawyer2_type']],
+            ['Lawyer Address', case['lawyer2_address']]
+        ]
+        lawyer2_table = Table(lawyer2_details, colWidths=[2*inch, 4*inch])
+        lawyer2_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (0,-1), colors.grey),
+            ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 10),
+            ('GRID', (0,0), (-1,-1), 1, colors.black)
+        ]))
+        story.append(lawyer2_table)
+        story.append(Spacer(1, 12))
+
+        # Lawyer 2 Evidence
+        story.append(Paragraph("Lawyer 2 Evidence:", styles['Heading3']))
+        lawyer2_evidence_data = [['IPFS Hash', 'Description', 'Original Name', 'Submitted At']]
+        for evidence in case.get('lawyer2_evidences', []):
+            lawyer2_evidence_data.append([
+                evidence['ipfs_hash'], 
+                evidence['description'], 
+                evidence['original_name'],
+                evidence['submitted_at']
+            ])
+        lawyer2_evidence_table = Table(lawyer2_evidence_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+        lawyer2_evidence_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.beige),
+            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 10),
+            ('GRID', (0,0), (-1,-1), 1, colors.black)
+        ]))
+        story.append(lawyer2_evidence_table)
+
+    # Build PDF
+    doc.build(story)
+    
+    return pdf_filename
 
 @router.post("/create")
 async def create_case(case_data: CaseCreateSchema):
@@ -38,7 +178,11 @@ async def create_case(case_data: CaseCreateSchema):
             "updated_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         }
         
-        return await redis_client.create_case(case_id, case_obj)
+        # Save case and generate initial PDF
+        saved_case = await redis_client.create_case(case_id, case_obj)
+        generate_case_pdf(case_obj)
+        
+        return saved_case
         
     except Exception as e:
         raise HTTPException(
@@ -84,7 +228,11 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
     
     case["updated_at"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     
-    return await redis_client.update_case(case_id, case)
+    # Update case in Redis and regenerate PDF
+    updated_case = await redis_client.update_case(case_id, case)
+    generate_case_pdf(case)
+    
+    return updated_case
 
 @router.get("/{case_id}")
 async def get_case(case_id: str):
