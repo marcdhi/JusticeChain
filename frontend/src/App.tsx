@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-do
 import { Home } from './components/Home'
 import { Cases } from './components/Cases'
 import { CreateCase } from './components/CreateCase'
+import { OktoDashboard } from './components/OktoDashboard'
 import { Button } from "./components/ui/button"
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 
@@ -16,7 +17,7 @@ interface NavLinkProps {
 function NavLink({ to, children, className = '' }: NavLinkProps) {
   const location = useLocation()
   const isActive = location.pathname === to
-  
+
   return (
     <Link 
       to={to} 
@@ -65,13 +66,20 @@ function AppContent() {
         </div>
       </nav>
 
-      <main className="flex-grow w-full">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/cases" element={<Cases />} />
-          <Route path="/create-case" element={<CreateCase />} />
-        </Routes>
-      </main>
+      <div className="flex-grow w-full flex">
+        <main className="flex-grow p-6">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/cases" element={<Cases />} />
+            <Route path="/create-case" element={<CreateCase />} />
+          </Routes>
+        </main>
+        {user && (
+          <aside className="w-1/3 p-6 border-l">
+            <OktoDashboard />
+          </aside>
+        )}
+      </div>
     </div>
   )
 }

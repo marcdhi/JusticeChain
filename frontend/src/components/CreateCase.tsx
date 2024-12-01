@@ -76,7 +76,6 @@ export const CreateCase = () => {
         ipfsLink = await uploadToPinata(caseData.document);
       }
 
-      // Request account access if needed
       const accounts = await window.ethereum.request({ 
         method: 'eth_requestAccounts' 
       });
@@ -95,14 +94,20 @@ export const CreateCase = () => {
         parseInt(caseData.defendantLawyerType),
         { 
           value: ethers.parseEther(caseData.escrowAmount),
-          gasLimit: 500000 // Add explicit gas limit
+          gasLimit: 1000000 // Increased gas limit
         }
       );
 
       setUploadStatus('Transaction sent, waiting for confirmation...');
       console.log('Transaction sent:', tx.hash);
       
-      await tx.wait();
+      const receipt = await tx.wait();
+      console.log('Transaction receipt:', receipt);
+      
+      if (receipt.status === 0) {
+        throw new Error('Transaction failed');
+      }
+      
       console.log('Case created successfully');
       setUploadStatus('Case created successfully!');
 
@@ -119,7 +124,15 @@ export const CreateCase = () => {
       });
     } catch (error) {
       console.error('Error creating case:', error);
-      setUploadStatus(error instanceof Error ? error.message : 'Error creating case');
+      if (error instanceof Error) {
+        if (error.message.includes('execution reverted')) {
+          setUploadStatus('Transaction failed: Contract execution reverted. Please check your inputs and try again.');
+        } else {
+          setUploadStatus(`Error creating case: ${error.message}`);
+        }
+      } else {
+        setUploadStatus('An unknown error occurred');
+      }
     } finally {
       setLoading(false);
     }

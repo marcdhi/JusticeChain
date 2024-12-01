@@ -6,11 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Card, CardTitle, CardContent} from "./ui/card"
 import { Badge } from "./ui/badge"
 import { CalendarIcon, FileIcon } from 'lucide-react'
+import { ethers } from 'ethers'
 
 export const Cases = () => {
   const { contract, walletConnected, connectWallet } = useAuth();
   const [cases, setCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -18,11 +20,14 @@ export const Cases = () => {
     const fetchCases = async () => {
       if (contract) {
         try {
+          setError(null);
           let index = 0;
           const fetchedCases = [];
           while (true) {
             try {
+              console.log(`Fetching case details for index: ${index}`);
               const caseDetails = await contract.getCaseDetails(index);
+              console.log(`Case details for index ${index}:`, caseDetails);
               fetchedCases.push({
                 id: index,
                 name: caseDetails.name,
@@ -34,6 +39,7 @@ export const Cases = () => {
               });
               index++;
             } catch (error) {
+              console.error(`Error fetching case at index ${index}:`, error);
               // If we get an error, assume we've reached the end of the cases
               break;
             }
@@ -41,6 +47,7 @@ export const Cases = () => {
           setCases(fetchedCases);
         } catch (error) {
           console.error('Error fetching cases:', error);
+          setError('Failed to fetch cases. Please try again later.');
         } finally {
           setLoading(false);
         }
@@ -62,6 +69,10 @@ export const Cases = () => {
 
   if (loading) {
     return <div className="flex justify-center items-center min-h-[400px]">Loading cases...</div>;
+  }
+
+  if (error) {
+    return <div className="flex justify-center items-center min-h-[400px] text-red-500">{error}</div>;
   }
 
   if (!walletConnected) {

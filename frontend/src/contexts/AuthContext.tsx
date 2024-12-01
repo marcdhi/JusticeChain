@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { Contract, BrowserProvider } from 'ethers';
+import { Contract, BrowserProvider, ethers } from 'ethers';
 import axios from 'axios';
 import { CONFIG } from '../config';
 import { getContract } from '../utils/ethereum';
@@ -19,6 +19,10 @@ interface AuthContextType {
   contract: Contract | null;
   connectWallet: () => Promise<void>;
   walletConnected: boolean;
+  createEmbeddedWallet: () => Promise<string | null>;
+  getWalletBalance: () => Promise<string>;
+  sendTransaction: (to: string, amount: string) => Promise<void>;
+  signMessage: (message: string) => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,6 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<any | null>(null);
   const [contract, setContract] = useState<Contract | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
+  const [embeddedWalletAddress, setEmbeddedWalletAddress] = useState<string | null>(null);
 
   useEffect(() => {
     const initializeGoogle = () => {
@@ -61,8 +66,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      const provider = new BrowserProvider(window.ethereum);
+      const provider = new ethers.BrowserProvider(window.ethereum);
       await provider.send('eth_requestAccounts', []);
+      const network = await provider.getNetwork();
+      
+      if (network.chainId !== BigInt(CONFIG.CHAIN_ID)) {
+        alert(`Please connect to the ${CONFIG.NETWORK_NAME} network`);
+        return;
+      }
+
       const signer = await provider.getSigner();
       const contractInstance = getContract(signer);
       setContract(contractInstance);
@@ -161,6 +173,124 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setContract(null);
       setWalletConnected(false);
+      setEmbeddedWalletAddress(null);
+    }
+  };
+
+  const createEmbeddedWallet = async (): Promise<string | null> => {
+    try {
+      const token = localStorage.getItem('oktoToken');
+      if (!token) {
+        throw new Error('User not authenticated');
+      }
+
+      const response = await axios.post(
+        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/create`,
+        {},
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-api-key': CONFIG.OKTO_APP_SECRET,
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (response.data?.data?.address) {
+        setEmbeddedWalletAddress(response.data.data.address);
+        console.log('Embedded wallet created:', response.data.data.address);
+        return response.data.data.address;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error creating embedded wallet:', error);
+      return null;
+    }
+  };
+
+  const getWalletBalance = async (): Promise<string> => {
+    try {
+      const token = localStorage.getItem('oktoToken');
+      if (!token || !embeddedWalletAddress) {
+        throw new Error('User not authenticated or embedded wallet not created');
+      }
+
+      const response = await axios.get(
+        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/balance`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-api-key': CONFIG.OKTO_APP_SECRET,
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (response.data?.data?.balance) {
+        return ethers.formatEther(response.data.data.balance);
+      }
+      return '0';
+    } catch (error) {
+      console.error('Error getting wallet balance:', error);
+      return '0';
+    }
+  };
+
+  const sendTransaction = async (to: string, amount: string) => {
+    try {
+      const token = localStorage.getItem('oktoToken');
+      if (!token || !embeddedWalletAddress) {
+        throw new Error('User not authenticated or embedded wallet not created');
+      }
+
+      const response = await axios.post(
+        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/send`,
+        {
+          to,
+          amount: ethers.parseEther(amount).toString(),
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-api-key': CONFIG.OKTO_APP_SECRET,
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      console.log('Transaction sent:', response.data);
+    } catch (error) {
+      console.error('Error sending transaction:', error);
+      throw error;
+    }
+  };
+
+  const signMessage = async (message: string): Promise<string> => {
+    try {
+      const token = localStorage.getItem('oktoToken');
+      if (!token || !embeddedWalletAddress) {
+        throw new Error('User not authenticated or embedded wallet not created');
+      }
+
+      const response = await axios.post(
+        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/sign`,
+        { message },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'x-api-key': CONFIG.OKTO_APP_SECRET,
+            'Accept': 'application/json'
+          }
+        }
+      );
+
+      if (response.data?.data?.signature) {
+        return response.data.data.signature;
+      }
+      throw new Error('Failed to sign message');
+    } catch (error) {
+      console.error('Error signing message:', error);
+      throw error;
     }
   };
 
@@ -184,6 +314,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(response.data.data);
             setIsAuthenticated(true);
             
+            // Check for existing embedded wallet
+            const walletResponse = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/wallet`, {
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'x-api-key': CONFIG.OKTO_APP_SECRET,
+                'Accept': 'application/json'
+              }
+            });
+            
+            if (walletResponse.data?.data?.address) {
+              setEmbeddedWalletAddress(walletResponse.data.data.address);
+            }
+
             if (window.ethereum) {
               try {
                 const accounts = await window.ethereum.request({ method: 'eth_accounts' });
@@ -217,7 +360,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout, 
       contract, 
       connectWallet,
-      walletConnected 
+      walletConnected,
+      createEmbeddedWallet,
+      getWalletBalance,
+      sendTransaction,
+      signMessage
     }}>
       {children}
     </AuthContext.Provider>
