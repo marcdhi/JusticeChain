@@ -4,6 +4,7 @@ import { Cases } from './components/Cases'
 import { CreateCase } from './components/CreateCase'
 import { Button } from "./components/ui/button"
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+
 import './App.css'
 
 interface NavLinkProps {
@@ -29,6 +30,11 @@ function NavLink({ to, children, className = '' }: NavLinkProps) {
 function AppContent() {
   const { user, login, logout } = useAuth();
 
+  const handleLogin = (e: React.MouseEvent) => {
+    e.preventDefault();
+    login();
+  };
+
   return (
     <div className="flex flex-col min-h-screen w-screen bg-gray-50">
       <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -52,7 +58,7 @@ function AppContent() {
                   <Button onClick={logout} variant="outline">Logout</Button>
                 </>
               ) : (
-                <Button onClick={login} variant="default">Login</Button>
+                <Button onClick={handleLogin} variant="default">Login</Button>
               )}
             </div>
           </div>
@@ -72,11 +78,11 @@ function AppContent() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
+    <AuthProvider>
+      <BrowserRouter>
         <AppContent />
-      </AuthProvider>
-    </BrowserRouter>
+      </BrowserRouter>
+    </AuthProvider>
   )
 }
 

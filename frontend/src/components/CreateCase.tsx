@@ -7,7 +7,7 @@ import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 
 export const CreateCase = () => {
-  const { contract } = useAuth();
+  const { contract, walletConnected, connectWallet } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -36,7 +36,21 @@ export const CreateCase = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contract) return;
+    
+    if (!walletConnected) {
+      try {
+        await connectWallet();
+      } catch (error) {
+        console.error('Failed to connect wallet:', error);
+        alert('Please connect your wallet to create a case');
+        return;
+      }
+    }
+
+    if (!contract) {
+      alert('Please connect your wallet to create a case');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -45,7 +59,6 @@ export const CreateCase = () => {
         ipfsHash = await uploadToPinata(file);
       }
 
-      // Assuming the createCase function in the smart contract takes these parameters
       const tx = await contract.createCase(
         title,
         title, // Using title as name for simplicity
@@ -58,6 +71,9 @@ export const CreateCase = () => {
 
       await tx.wait();
       alert('Case created successfully!');
+      setTitle('');
+      setDescription('');
+      setFile(null);
     } catch (error) {
       console.error('Error creating case:', error);
       alert('Failed to create case. Please try again.');
@@ -72,6 +88,19 @@ export const CreateCase = () => {
         <h1 className="text-3xl font-bold text-gray-800 mb-4">Create New Case</h1>
         <p className="text-gray-600">Submit a new case to the blockchain</p>
       </div>
+
+      {!walletConnected && (
+        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-yellow-800">Please connect your wallet to create a case</p>
+          <Button 
+            onClick={connectWallet}
+            variant="outline"
+            className="mt-2"
+          >
+            Connect Wallet
+          </Button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
@@ -107,10 +136,14 @@ export const CreateCase = () => {
           <p className="text-sm text-gray-500">PDF, DOC up to 10MB</p>
         </div>
 
-        <Button type="submit" disabled={loading} className="w-full">
+        <Button 
+          type="submit" 
+          disabled={loading || !walletConnected} 
+          className="w-full"
+        >
           {loading ? 'Submitting...' : 'Submit Case'}
         </Button>
       </form>
     </div>
   )
-}
+};

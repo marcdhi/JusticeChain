@@ -7,7 +7,7 @@ import { Card, CardTitle, CardContent} from "./ui/card"
 import { Badge } from "./ui/badge"
 
 export const Cases = () => {
-  const { contract } = useAuth();
+  const { contract, walletConnected, connectWallet } = useAuth();
   const [cases, setCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -15,7 +15,6 @@ export const Cases = () => {
     const fetchCases = async () => {
       if (contract) {
         try {
-          // Assuming the contract has a method to get all cases
           const casesCount = await contract.getCasesCount();
           const fetchedCases = [];
           for (let i = 0; i < casesCount; i++) {
@@ -30,15 +29,34 @@ export const Cases = () => {
         }
       }
     };
-    fetchCases();
-  }, [contract]);
+
+    if (walletConnected) {
+      fetchCases();
+    } else {
+      setLoading(false);
+    }
+  }, [contract, walletConnected]);
 
   if (loading) {
-    return <div>Loading cases...</div>;
+    return <div className="flex justify-center items-center min-h-[400px]">Loading cases...</div>;
+  }
+
+  if (!walletConnected) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold text-gray-800 mb-4">Cases</h1>
+          <p className="text-xl text-gray-600 mb-8">Connect your wallet to view cases</p>
+          <Button onClick={connectWallet} variant="default">
+            Connect Wallet
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
+    <div className="max-w-6xl mx-auto space-y-8 p-6">
       <div>
         <h1 className="text-4xl font-bold text-gray-800 mb-4">Cases</h1>
         <p className="text-xl text-gray-600">Browse and search through all registered cases</p>
@@ -63,35 +81,34 @@ export const Cases = () => {
         </Select>
       </div>
 
-      <div className="grid gap-6">
-        {cases.map((caseItem, index) => (
-          <Card key={index}>
-            <CardContent className="pt-6">
-              <div className="flex flex-col sm:flex-row justify-between gap-4">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4">
-                    <CardTitle>Case #{index + 1}</CardTitle>
-                    <Badge variant="default">{caseItem.status === 0 ? 'Open' : 'Closed'}</Badge>
-                  </div>
-                  <p className="text-gray-600 leading-relaxed">
-                    {caseItem.description}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-6 text-sm text-gray-500">
-                    <div className="flex items-center gap-2">
-                      <CalendarIcon className="w-4 h-4" />
-                      Filed: {new Date(caseItem.timestamp * 1000).toLocaleDateString()}
-                    </div>
-                  </div>
+      {cases.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No cases found</p>
+        </div>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {cases.map((caseItem, index) => (
+            <Card key={index} className="overflow-hidden">
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <CardTitle className="text-xl">{caseItem.title}</CardTitle>
+                  <Badge variant={caseItem.status === 0 ? "default" : "secondary"}>
+                    {caseItem.status === 0 ? 'Open' : 'Closed'}
+                  </Badge>
                 </div>
-                <Button variant="outline">View Details</Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                <p className="text-gray-600 mb-4 line-clamp-3">{caseItem.description}</p>
+                <div className="flex items-center text-sm text-gray-500">
+                  <CalendarIcon className="w-4 h-4 mr-2" />
+                  <span>Created {new Date(caseItem.timestamp * 1000).toLocaleDateString()}</span>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
-  )
-}
+  );
+};
 
 function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -109,5 +126,5 @@ function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
         d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
       />
     </svg>
-  )
+  );
 }
