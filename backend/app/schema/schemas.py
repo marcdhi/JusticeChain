@@ -33,5 +33,10 @@ class CaseCreateSchema(BaseModel):
     files: List[FileDescription]
     lawyer1_type: LawyerType
     lawyer1_address: str
-    case_status: CaseStatus = CaseStatus.OPEN 
-    
+    case_status: CaseStatus = CaseStatus.OPEN
+
+class ChatMessageSchema(BaseModel):
+    type: str
+    content: str
+    user_address: str
+    case_id: str
