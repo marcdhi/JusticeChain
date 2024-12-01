@@ -5,6 +5,13 @@ import { CreateCase } from './components/CreateCase'
 import { OktoDashboard } from './components/OktoDashboard'
 import { Button } from "./components/ui/button"
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { HH } from './components/HumanHuman/HH'
+import { HAI } from './components/HumanAI/HAI'
+import { HH_CreateCase } from './components/HumanHuman/HH_CreateCase';
+import { HAI_CreateCase } from './components/HumanAI/HAI_CreateCase';
+import { EvidenceSubmission } from './components/EvidenceSubmission';
+import { CaseReview } from './components/CaseReview';
+import { Courtroom } from './components/Courtroom';
 
 import './App.css'
 
@@ -53,9 +60,9 @@ function AppContent() {
               </NavLink>
               {user ? (
                 <>
-                  <Button asChild variant="default">
+                  {/* <Button asChild variant="default">
                     <Link to="/create-case">Create Case</Link>
-                  </Button>
+                  </Button> */}
                   <Button onClick={logout} variant="outline">Logout</Button>
                 </>
               ) : (
@@ -71,7 +78,18 @@ function AppContent() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/cases" element={<Cases />} />
-            <Route path="/create-case" element={<CreateCase />} />
+            <Route path="/create-case" element={<CreateCase mode="human-human" />} />
+            <Route path="/human-human" element={<HH />} />
+            <Route path="/human-ai" element={<HAI />} />
+            <Route path="/human-human/create" element={<HH_CreateCase />} />
+            <Route path="/human-ai/create" element={<HAI_CreateCase />} />
+            <Route path="/human-human/case/:caseId/evidence" element={<EvidenceSubmission mode="human-human" role="lawyer1" />} />
+            <Route path="/human-human/case/:caseId/evidence2" element={<EvidenceSubmission mode="human-human" role="lawyer2" />} />
+            <Route path="/human-ai/case/:caseId/evidence" element={<EvidenceSubmission mode="human-ai" role="lawyer1" />} />
+            <Route path="/human-ai/case/:caseId/ai-evidence" element={<EvidenceSubmission mode="human-ai" role="ai" />} />
+            <Route path="/human-human/case/:caseId/review" element={<CaseReview mode="human-human" />} />
+            <Route path="/human-ai/case/:caseId/review" element={<CaseReview mode="human-ai" />} />
+            <Route path="/courtroom/:caseId" element={<Courtroom />} />
           </Routes>
         </main>
         {user && (

@@ -170,10 +170,11 @@ async def create_case(case_data: CaseCreateSchema):
                     "submitted_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
                 } for file in case_data.files
             ],
-            "lawyer2_type": None,   
+            "lawyer2_type": "AI" if case_data.mode == "human-ai" else None,   
             "lawyer2_address": None,
             "lawyer2_evidences": [],
             "case_status": case_data.case_status,
+            "mode": case_data.mode,  # Add mode to case object
             "created_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
             "updated_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         }
@@ -197,21 +198,6 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
-    # For Human-AI cases
-    if evidence_data.lawyer_type == LawyerType.AI:
-        case["lawyer2_type"] = LawyerType.AI
-        
-    # For Human-Human cases
-    else:
-        if not case["lawyer2_address"] and evidence_data.lawyer_address != case["lawyer1_address"]:
-            case["lawyer2_type"] = LawyerType.HUMAN
-            case["lawyer2_address"] = evidence_data.lawyer_address
-        elif evidence_data.lawyer_address not in [case["lawyer1_address"], case["lawyer2_address"]]:
-            raise HTTPException(
-                status_code=403,
-                detail="Only registered lawyers can submit evidence"
-            )
-    
     evidence_with_timestamp = [
         {
             "ipfs_hash": evidence.ipfs_hash,
@@ -220,11 +206,37 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
             "submitted_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         } for evidence in evidence_data.evidences
     ]
-    
-    if evidence_data.lawyer_address == case["lawyer1_address"]:
-        case["lawyer1_evidences"].extend(evidence_with_timestamp)
+
+    # Determine if this is a Human-AI case
+    is_human_ai_case = case["lawyer1_type"] == LawyerType.HUMAN and (
+        case["lawyer2_type"] == LawyerType.AI or case["lawyer2_type"] is None
+    )
+
+    if is_human_ai_case:
+        # For Human-AI cases
+        if evidence_data.lawyer_type == LawyerType.AI:
+            # AI evidence goes to lawyer2
+            case["lawyer2_type"] = LawyerType.AI
+            case["lawyer2_evidences"].extend(evidence_with_timestamp)
+        else:
+            # Human evidence goes to lawyer1
+            case["lawyer1_evidences"].extend(evidence_with_timestamp)
     else:
-        case["lawyer2_evidences"].extend(evidence_with_timestamp)
+        # For Human-Human cases
+        if evidence_data.lawyer_address == case["lawyer1_address"]:
+            case["lawyer1_evidences"].extend(evidence_with_timestamp)
+        elif not case["lawyer2_address"]:
+            # First submission from lawyer2
+            case["lawyer2_type"] = LawyerType.HUMAN
+            case["lawyer2_address"] = evidence_data.lawyer_address
+            case["lawyer2_evidences"].extend(evidence_with_timestamp)
+        elif evidence_data.lawyer_address == case["lawyer2_address"]:
+            case["lawyer2_evidences"].extend(evidence_with_timestamp)
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail="Only registered lawyers can submit evidence"
+            )
     
     case["updated_at"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     
@@ -246,3 +258,19 @@ async def get_case(case_id: str):
 async def list_cases():
     """Lists all cases"""
     return await redis_client.list_cases()
+
+@router.patch("/{case_id}/status")
+async def update_case_status(case_id: str, status: dict):
+    """Updates the status of a case"""
+    case = await redis_client.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    case["case_status"] = status["status"]
+    case["updated_at"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    
+    # Update case in Redis and regenerate PDF
+    updated_case = await redis_client.update_case(case_id, case)
+    generate_case_pdf(case)
+    
+    return updated_case
