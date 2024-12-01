@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.api.cases.routes import router as cases_router
+from app.websockets.routes import router as websocket_router
 
 app = FastAPI(
     title="JusticeChain API",
@@ -11,3 +12,4 @@ def root():
 
 # Include routers
 app.include_router(cases_router, prefix="/cases", tags=["cases"])
+app.include_router(websocket_router, tags=["websocket"])
