@@ -3,7 +3,7 @@ import { Home } from './components/Home'
 import { Cases } from './components/Cases'
 import { CreateCase } from './components/CreateCase'
 import { Button } from "./components/ui/button"
-
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 import './App.css'
 
 interface NavLinkProps {
@@ -26,39 +26,56 @@ function NavLink({ to, children, className = '' }: NavLinkProps) {
   )
 }
 
+function AppContent() {
+  const { user, login, logout } = useAuth();
+
+  return (
+    <div className="flex flex-col min-h-screen w-screen bg-gray-50">
+      <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            <Link 
+              to="/" 
+              className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
+            >
+              JusticeChain
+            </Link>
+            <div className="flex items-center gap-6">
+              <NavLink to="/cases" className="font-medium">
+                Cases
+              </NavLink>
+              {user ? (
+                <>
+                  <Button asChild variant="default">
+                    <Link to="/create-case">Create Case</Link>
+                  </Button>
+                  <Button onClick={logout} variant="outline">Logout</Button>
+                </>
+              ) : (
+                <Button onClick={login} variant="default">Login</Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="flex-grow w-full">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/cases" element={<Cases />} />
+          <Route path="/create-case" element={<CreateCase />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}
+
 function App() {
   return (
     <BrowserRouter>
-      <div className="flex flex-col min-h-screen w-screen bg-gray-50">
-        <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="w-full px-4 sm:px-6 lg:px-8">
-            <div className="flex h-16 items-center justify-between">
-              <Link 
-                to="/" 
-                className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
-              >
-                JusticeChain
-              </Link>
-              <div className="flex items-center gap-6">
-                <NavLink to="/cases" className="font-medium">
-                  Cases
-                </NavLink>
-                <Button asChild variant="default">
-                  <Link to="/create-case">Create Case</Link>
-                </Button>
-              </div>
-            </div>
-          </div>
-        </nav>
-
-        <main className="flex-grow w-full">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/cases" element={<Cases />} />
-            <Route path="/create-case" element={<CreateCase />} />
-          </Routes>
-        </main>
-      </div>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </BrowserRouter>
   )
 }

@@ -1,73 +1,116 @@
-export const CreateCase = () => (
+import { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import axios from 'axios'
+import { ethers } from 'ethers'
+import { CONFIG } from '../config'
+import { Button } from "./ui/button"
+import { Input } from "./ui/input"
+
+export const CreateCase = () => {
+  const { contract } = useAuth();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFile(e.target.files[0]);
+    }
+  };
+
+  const uploadToPinata = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
+      headers: {
+        'Content-Type': `multipart/form-data`,
+        'pinata_api_key': CONFIG.PINATA_API_KEY,
+        'pinata_secret_api_key': CONFIG.PINATA_API_SECRET
+      }
+    });
+
+    return res.data.IpfsHash;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contract) return;
+
+    setLoading(true);
+    try {
+      let ipfsHash = '';
+      if (file) {
+        ipfsHash = await uploadToPinata(file);
+      }
+
+      // Assuming the createCase function in the smart contract takes these parameters
+      const tx = await contract.createCase(
+        title,
+        title, // Using title as name for simplicity
+        description,
+        ipfsHash, // Using ipfsHash as context
+        ethers.ZeroAddress, // placeholder for defendant address
+        0, // placeholder for plaintiff lawyer type
+        0  // placeholder for defendant lawyer type
+      );
+
+      await tx.wait();
+      alert('Case created successfully!');
+    } catch (error) {
+      console.error('Error creating case:', error);
+      alert('Failed to create case. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-800 mb-4">Create New Case</h1>
         <p className="text-gray-600">Submit a new case to the blockchain</p>
       </div>
-  
-      <form className="bg-white rounded-lg shadow-md p-6">
-        <div className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Case Title
-            </label>
-            <input
-              type="text"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Enter case title"
-            />
-          </div>
-  
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Description
-            </label>
-            <textarea
-              rows={4}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="Describe your case..."
-            />
-          </div>
-  
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Supporting Documents
-            </label>
-            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg">
-              <div className="space-y-1 text-center">
-                <svg
-                  className="mx-auto h-12 w-12 text-gray-400"
-                  stroke="currentColor"
-                  fill="none"
-                  viewBox="0 0 48 48"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                    strokeWidth={2}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                <div className="flex text-sm text-gray-600">
-                  <label className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500">
-                    <span>Upload a file</span>
-                    <input type="file" className="sr-only" />
-                  </label>
-                  <p className="pl-1">or drag and drop</p>
-                </div>
-                <p className="text-xs text-gray-500">PDF, DOC up to 10MB</p>
-              </div>
-            </div>
-          </div>
-  
-          <button
-            type="submit"
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Submit Case
-          </button>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-700">Case Title</p>
+          <Input
+            id="title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Enter case title"
+            required
+          />
         </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-700">Description</p>
+          <Input
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe your case..."
+            required
+          />
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-700">Supporting Documents</p>
+          <Input
+            id="file"
+            type="file"
+            onChange={handleFileChange}
+            className="cursor-pointer"
+          />
+          <p className="text-sm text-gray-500">PDF, DOC up to 10MB</p>
+        </div>
+
+        <Button type="submit" disabled={loading} className="w-full">
+          {loading ? 'Submitting...' : 'Submit Case'}
+        </Button>
       </form>
     </div>
-  ) 
+  )
+}
