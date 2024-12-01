@@ -1,25 +1,42 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { Input } from "./ui/input"
 import { Button } from "./ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { Card, CardTitle, CardContent} from "./ui/card"
 import { Badge } from "./ui/badge"
+import { CalendarIcon, FileIcon } from 'lucide-react'
 
 export const Cases = () => {
   const { contract, walletConnected, connectWallet } = useAuth();
   const [cases, setCases] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
     const fetchCases = async () => {
       if (contract) {
         try {
-          const casesCount = await contract.getCasesCount();
+          let index = 0;
           const fetchedCases = [];
-          for (let i = 0; i < casesCount; i++) {
-            const caseDetails = await contract.getCaseDetails(i);
-            fetchedCases.push(caseDetails);
+          while (true) {
+            try {
+              const caseDetails = await contract.getCaseDetails(index);
+              fetchedCases.push({
+                id: index,
+                name: caseDetails.name,
+                title: caseDetails.title,
+                description: caseDetails.description,
+                status: caseDetails.status,
+                timestamp: new Date(Number(caseDetails.conversationTimestamp) * 1000),
+                ipfsLink: caseDetails.context
+              });
+              index++;
+            } catch (error) {
+              // If we get an error, assume we've reached the end of the cases
+              break;
+            }
           }
           setCases(fetchedCases);
         } catch (error) {
@@ -30,12 +47,18 @@ export const Cases = () => {
       }
     };
 
-    if (walletConnected) {
+    if (walletConnected && contract) {
       fetchCases();
     } else {
       setLoading(false);
     }
   }, [contract, walletConnected]);
+
+  const filteredCases = cases.filter(caseItem => 
+    (caseItem.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     caseItem.description.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (statusFilter === 'all' || caseItem.status.toString() === statusFilter)
+  );
 
   if (loading) {
     return <div className="flex justify-center items-center min-h-[400px]">Loading cases...</div>;
@@ -67,28 +90,29 @@ export const Cases = () => {
           type="text"
           placeholder="Search cases..."
           className="flex-1"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="closed">Closed</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="0">Open</SelectItem>
+            <SelectItem value="1">Closed</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {cases.length === 0 ? (
+      {filteredCases.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-500">No cases found</p>
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {cases.map((caseItem, index) => (
-            <Card key={index} className="overflow-hidden">
+          {filteredCases.map((caseItem) => (
+            <Card key={caseItem.id} className="overflow-hidden">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start mb-4">
                   <CardTitle className="text-xl">{caseItem.title}</CardTitle>
@@ -99,8 +123,14 @@ export const Cases = () => {
                 <p className="text-gray-600 mb-4 line-clamp-3">{caseItem.description}</p>
                 <div className="flex items-center text-sm text-gray-500">
                   <CalendarIcon className="w-4 h-4 mr-2" />
-                  <span>Created {new Date(caseItem.timestamp * 1000).toLocaleDateString()}</span>
+                  <span>Created {caseItem.timestamp.toLocaleDateString()}</span>
                 </div>
+                {caseItem.ipfsLink && (
+                  <a href={caseItem.ipfsLink} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center text-sm text-blue-500 hover:underline">
+                    <FileIcon className="w-4 h-4 mr-2" />
+                    View Document
+                  </a>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -109,22 +139,3 @@ export const Cases = () => {
     </div>
   );
 };
-
-function CalendarIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
-      />
-    </svg>
-  );
-}

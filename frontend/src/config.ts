@@ -7,5 +7,6 @@ export const CONFIG = {
   ALCHEMY_API_KEY: import.meta.env.VITE_ALCHEMY_API_KEY!,
   NETWORK_URL: import.meta.env.VITE_NETWORK_URL!,
   CONTRACT_ADDRESS: import.meta.env.VITE_CONTRACT_ADDRESS!,
+  PINATA_GATEWAY: "https://gateway.pinata.cloud",
 };
 

@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { Contract, JsonRpcProvider, BrowserProvider } from 'ethers';
+import { Contract, BrowserProvider } from 'ethers';
 import axios from 'axios';
 import { CONFIG } from '../config';
 import { getContract } from '../utils/ethereum';
@@ -29,7 +29,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [contract, setContract] = useState<Contract | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
 
-  // Initialize Google Identity Services
   useEffect(() => {
     const initializeGoogle = () => {
       if (window.google) {
@@ -45,7 +44,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    // Wait for the Google Identity Services script to load
     const checkGoogleLoaded = setInterval(() => {
       if (window.google) {
         clearInterval(checkGoogleLoaded);
@@ -75,53 +73,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setWalletConnected(false);
     }
   };
-
-  // Check authentication status
-  useEffect(() => {
-    const checkAuth = async () => {
-      const token = localStorage.getItem('oktoToken');
-      console.log("Checking auth with token:", token ? 'exists' : 'not found');
-      
-      if (token) {
-        try {
-          const response = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/user_from_token`, {
-            headers: { 
-              'Authorization': `Bearer ${token}`,
-              'x-api-key': CONFIG.OKTO_APP_SECRET,
-              'Accept': 'application/json'
-            }
-          });
-          
-          if (response.data?.data) {
-            console.log('User profile loaded:', response.data.data);
-            setUser(response.data.data);
-            setIsAuthenticated(true);
-            
-            // Check if wallet is already connected
-            if (window.ethereum) {
-              try {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts.length > 0) {
-                  await connectWallet();
-                }
-              } catch (error) {
-                console.error('Error checking wallet connection:', error);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error checking authentication:', error);
-          if (axios.isAxiosError(error)) {
-            console.error('API Error details:', error.response?.data);
-          }
-          localStorage.removeItem('oktoToken');
-          setIsAuthenticated(false);
-          setUser(null);
-        }
-      }
-    };
-    checkAuth();
-  }, []);
 
   const handleGoogleLogin = async (response: any) => {
     console.log('Google login response received:', response);
@@ -212,6 +163,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setWalletConnected(false);
     }
   };
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('oktoToken');
+      console.log("Checking auth with token:", token ? 'exists' : 'not found');
+      
+      if (token) {
+        try {
+          const response = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/user_from_token`, {
+            headers: { 
+              'Authorization': `Bearer ${token}`,
+              'x-api-key': CONFIG.OKTO_APP_SECRET,
+              'Accept': 'application/json'
+            }
+          });
+          
+          if (response.data?.data) {
+            console.log('User profile loaded:', response.data.data);
+            setUser(response.data.data);
+            setIsAuthenticated(true);
+            
+            if (window.ethereum) {
+              try {
+                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                if (accounts.length > 0) {
+                  await connectWallet();
+                }
+              } catch (error) {
+                console.error('Error checking wallet connection:', error);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error checking authentication:', error);
+          if (axios.isAxiosError(error)) {
+            console.error('API Error details:', error.response?.data);
+          }
+          localStorage.removeItem('oktoToken');
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      }
+    };
+    checkAuth();
+  }, []);
 
   return (
     <AuthContext.Provider value={{ 

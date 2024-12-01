@@ -1,21 +1,40 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import axios from 'axios'
-import { ethers } from 'ethers'
-import { CONFIG } from '../config'
-import { Button } from "./ui/button"
 import { Input } from "./ui/input"
+import { Button } from "./ui/button"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
+import { ethers } from 'ethers'
+import axios from 'axios'
+import { CONFIG } from '../config'
 
 export const CreateCase = () => {
   const { contract, walletConnected, connectWallet } = useAuth();
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [caseData, setCaseData] = useState({
+    name: '',
+    title: '',
+    description: '',
+    defendant: '',
+    plaintiffLawyerType: '0',
+    defendantLawyerType: '0',
+    escrowAmount: '',
+    document: null as File | null,
+  });
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setCaseData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSelectChange = (name: string) => (value: string) => {
+    setCaseData(prev => ({ ...prev, [name]: value }));
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) {
+      setCaseData(prev => ({ ...prev, document: e.target.files![0] }));
     }
   };
 
@@ -23,127 +42,167 @@ export const CreateCase = () => {
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
-      headers: {
-        'Content-Type': `multipart/form-data`,
-        'pinata_api_key': CONFIG.PINATA_API_KEY,
-        'pinata_secret_api_key': CONFIG.PINATA_API_SECRET
-      }
-    });
+    try {
+      setUploadStatus('Uploading to IPFS...');
+      const res = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'pinata_api_key': CONFIG.PINATA_API_KEY,
+          'pinata_secret_api_key': CONFIG.PINATA_API_SECRET,
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
 
-    return res.data.IpfsHash;
+      setUploadStatus('File uploaded successfully!');
+      return `https://ipfs.io/ipfs/${res.data.IpfsHash}`;
+    } catch (error) {
+      console.error('Error uploading to Pinata:', error);
+      setUploadStatus('Error uploading file. Please try again.');
+      throw new Error('Failed to upload file to IPFS');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!walletConnected) {
-      try {
-        await connectWallet();
-      } catch (error) {
-        console.error('Failed to connect wallet:', error);
-        alert('Please connect your wallet to create a case');
-        return;
-      }
-    }
-
     if (!contract) {
-      alert('Please connect your wallet to create a case');
+      console.error('Contract is not initialized');
       return;
     }
-
     setLoading(true);
     try {
-      let ipfsHash = '';
-      if (file) {
-        ipfsHash = await uploadToPinata(file);
+      let ipfsLink = '';
+      if (caseData.document) {
+        ipfsLink = await uploadToPinata(caseData.document);
+      }
+
+      // Request account access if needed
+      const accounts = await window.ethereum.request({ 
+        method: 'eth_requestAccounts' 
+      });
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error('No accounts found');
       }
 
       const tx = await contract.createCase(
-        title,
-        title, // Using title as name for simplicity
-        description,
-        ipfsHash, // Using ipfsHash as context
-        ethers.ZeroAddress, // placeholder for defendant address
-        0, // placeholder for plaintiff lawyer type
-        0  // placeholder for defendant lawyer type
+        caseData.name,
+        caseData.title,
+        caseData.description,
+        ipfsLink,
+        caseData.defendant || ethers.ZeroAddress,
+        parseInt(caseData.plaintiffLawyerType),
+        parseInt(caseData.defendantLawyerType),
+        { 
+          value: ethers.parseEther(caseData.escrowAmount),
+          gasLimit: 500000 // Add explicit gas limit
+        }
       );
 
+      setUploadStatus('Transaction sent, waiting for confirmation...');
+      console.log('Transaction sent:', tx.hash);
+      
       await tx.wait();
-      alert('Case created successfully!');
-      setTitle('');
-      setDescription('');
-      setFile(null);
+      console.log('Case created successfully');
+      setUploadStatus('Case created successfully!');
+
+      // Reset form
+      setCaseData({
+        name: '',
+        title: '',
+        description: '',
+        defendant: '',
+        plaintiffLawyerType: '0',
+        defendantLawyerType: '0',
+        escrowAmount: '',
+        document: null,
+      });
     } catch (error) {
       console.error('Error creating case:', error);
-      alert('Failed to create case. Please try again.');
+      setUploadStatus(error instanceof Error ? error.message : 'Error creating case');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="max-w-2xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">Create New Case</h1>
-        <p className="text-gray-600">Submit a new case to the blockchain</p>
+  if (!walletConnected) {
+    return (
+      <div className="max-w-md mx-auto mt-10">
+        <Card>
+          <CardHeader>
+            <CardTitle>Connect Wallet</CardTitle>
+            <CardDescription>You need to connect your wallet to create a case.</CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button onClick={connectWallet}>Connect Wallet</Button>
+          </CardFooter>
+        </Card>
       </div>
+    );
+  }
 
-      {!walletConnected && (
-        <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-          <p className="text-yellow-800">Please connect your wallet to create a case</p>
-          <Button 
-            onClick={connectWallet}
-            variant="outline"
-            className="mt-2"
-          >
-            Connect Wallet
-          </Button>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-700">Case Title</p>
-          <Input
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Enter case title"
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-700">Description</p>
-          <Input
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe your case..."
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-700">Supporting Documents</p>
-          <Input
-            id="file"
-            type="file"
-            onChange={handleFileChange}
-            className="cursor-pointer"
-          />
-          <p className="text-sm text-gray-500">PDF, DOC up to 10MB</p>
-        </div>
-
-        <Button 
-          type="submit" 
-          disabled={loading || !walletConnected} 
-          className="w-full"
-        >
-          {loading ? 'Submitting...' : 'Submit Case'}
-        </Button>
-      </form>
+  return (
+    <div className="max-w-2xl mx-auto mt-10">
+      <Card>
+        <CardHeader>
+          <CardTitle>Create a New Case</CardTitle>
+          <CardDescription>Fill in the details to create a new legal case.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit}>
+            <div className="grid w-full items-center gap-4">
+              <div>
+                <Input id="name" name="name" placeholder="Case Name" value={caseData.name} onChange={handleInputChange} required />
+              </div>
+              <div>
+                <Input id="title" name="title" placeholder="Title" value={caseData.title} onChange={handleInputChange} required />
+              </div>
+              <div>
+                <Input id="description" name="description" placeholder="Description" value={caseData.description} onChange={handleInputChange} required />
+              </div>
+              <div>
+                <Input id="defendant" name="defendant" placeholder="Defendant Address (optional)" value={caseData.defendant} onChange={handleInputChange} />
+              </div>
+              <div>
+                <Select value={caseData.plaintiffLawyerType} onValueChange={handleSelectChange('plaintiffLawyerType')}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Plaintiff Lawyer Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Human</SelectItem>
+                    <SelectItem value="1">AI</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Select value={caseData.defendantLawyerType} onValueChange={handleSelectChange('defendantLawyerType')}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Defendant Lawyer Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Human</SelectItem>
+                    <SelectItem value="1">AI</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Input id="escrowAmount" name="escrowAmount" type="number" step="0.01" placeholder="Escrow Amount (ETH)" value={caseData.escrowAmount} onChange={handleInputChange} required />
+              </div>
+              <div>
+                <Input id="document" name="document" type="file" onChange={handleFileChange} />
+              </div>
+              {uploadStatus && (
+                <div className="text-sm text-muted-foreground">
+                  {uploadStatus}
+                </div>
+              )}
+            </div>
+            <Button type="submit" className="mt-6" disabled={loading}>
+              {loading ? 'Creating Case...' : 'Create Case'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
-  )
+  );
 };
