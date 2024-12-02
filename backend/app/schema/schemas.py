@@ -11,10 +11,6 @@ class LawyerType(str, Enum):
     HUMAN = "Human"
     AI = "AI"
 
-class CaseMode(str, Enum):
-    HUMAN_HUMAN = "human-human"
-    HUMAN_AI = "human-ai"
-
 class FileDescription(BaseModel):
     ipfs_hash: str
     description: str
@@ -37,5 +33,4 @@ class CaseCreateSchema(BaseModel):
     files: List[FileDescription]
     lawyer1_type: LawyerType
     lawyer1_address: str
-    case_status: CaseStatus = CaseStatus.OPEN
-    mode: CaseMode
+    case_status: CaseStatus = CaseStatus.OPEN 
