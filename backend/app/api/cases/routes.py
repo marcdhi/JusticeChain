@@ -150,6 +150,19 @@ def generate_case_pdf(case: dict) -> str:
     
     return pdf_filename
 
+@router.get("/{case_id}")
+async def get_case(case_id: str):
+    """Retrieves full case details"""
+    case = redis_client.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return case
+
+@router.get("/")
+async def list_cases():
+    """Lists all cases"""
+    return redis_client.list_cases()
+
 @router.post("/create")
 async def create_case(case_data: CaseCreateSchema):
     """Creates a new case with initial evidence"""
@@ -174,13 +187,12 @@ async def create_case(case_data: CaseCreateSchema):
             "lawyer2_address": None,
             "lawyer2_evidences": [],
             "case_status": case_data.case_status,
-            "mode": case_data.mode,  # Add mode to case object
+            "mode": case_data.mode,
             "created_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
             "updated_at": datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         }
         
-        # Save case and generate initial PDF
-        saved_case = await redis_client.create_case(case_id, case_obj)
+        saved_case = redis_client.create_case(case_id, case_obj)
         generate_case_pdf(case_obj)
         
         return saved_case
@@ -194,7 +206,7 @@ async def create_case(case_data: CaseCreateSchema):
 @router.post("/{case_id}/evidence")
 async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema):
     """Submits additional evidence to an existing case"""
-    case = await redis_client.get_case(case_id)
+    case = redis_client.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
@@ -240,37 +252,22 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
     
     case["updated_at"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     
-    # Update case in Redis and regenerate PDF
-    updated_case = await redis_client.update_case(case_id, case)
+    updated_case = redis_client.update_case(case_id, case)
     generate_case_pdf(case)
     
     return updated_case
 
-@router.get("/{case_id}")
-async def get_case(case_id: str):
-    """Retrieves full case details"""
-    case = await redis_client.get_case(case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    return case
-
-@router.get("/")
-async def list_cases():
-    """Lists all cases"""
-    return await redis_client.list_cases()
-
 @router.patch("/{case_id}/status")
 async def update_case_status(case_id: str, status: dict):
     """Updates the status of a case"""
-    case = await redis_client.get_case(case_id)
+    case = redis_client.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
     case["case_status"] = status["status"]
     case["updated_at"] = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
     
-    # Update case in Redis and regenerate PDF
-    updated_case = await redis_client.update_case(case_id, case)
+    updated_case = redis_client.update_case(case_id, case)
     generate_case_pdf(case)
     
     return updated_case

@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "./ui/
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { api } from '../services/api';
+import { HAIChatInterface } from './HumanAI/HAIChatInterface';
 
 // Helper function to parse the backend date format
 const parseBackendDate = (dateStr: string) => {
@@ -35,6 +36,7 @@ export const Courtroom = () => {
           throw new Error('Case ID not found');
         }
         const data = await api.getCase(caseId);
+        console.log("Case Data", data);
         setCaseData(data);
       } catch (error) {
         console.error('Error fetching case:', error);
@@ -154,6 +156,17 @@ export const Courtroom = () => {
           </div>
         </CardContent>
       </Card>
+
+      {caseData.mode === 'human-ai' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Courtroom Chat</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <HAIChatInterface caseId={caseId!} />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }; 

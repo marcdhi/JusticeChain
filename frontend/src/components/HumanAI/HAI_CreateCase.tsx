@@ -1,6 +1,8 @@
 import { CreateCase } from '../CreateCase';
 
 export const HAI_CreateCase = () => {
+  
+  
   return (
     <div className="max-w-6xl mx-auto space-y-8 p-6">
       <div>
