@@ -5,10 +5,29 @@ from pydantic import BaseModel
 from typing import List, Optional
 import os
 from dotenv import load_dotenv
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from ..config import settings
 import random
+import spacy
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+
+# Load spaCy model
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    print("Downloading spacy model...")
+    import subprocess
+    subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
+
+# Configure Llama Index settings
+Settings.chunk_size = 512
+Settings.chunk_overlap = 50
 
 # Pydantic Models
 class LawyerContext(BaseModel):
@@ -135,26 +154,64 @@ class AILawyer(VectorDBMixin):
             "api_key": settings.galadriel_api_key,
             "base_url": settings.galadriel_base_url
         }
+        
+        # Initialize NLP pipelines
+        self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+        self.sentiment_analyzer = pipeline("sentiment-analysis")
 
     def respond(self, query):
+        # Get relevant documents using vector retriever
         response = self.retriever.retrieve(query)
-        generated_response = self.generate_response(response, query)
+        response_texts = [node.text for node in response]
+        
+        # Extract insights
+        insights = self.extract_insights(response_texts)
+        
+        # Generate response using insights
+        generated_response = self.generate_response_with_insights(query, insights)
+        
         return {
             "input": "AI Lawyer's Argument",
             "context": generated_response,
             "speaker": "ai"
         }
 
-    def generate_response(self, response, query):
-        # Create a prompt for the LLM using the user query and retrieved response
+    def extract_insights(self, response):
+        # Implementation of extract_insights method
+        combined_text = " ".join(response)
+        max_length = 375
+        words = combined_text.split()
+        chunks = [' '.join(words[i:i + max_length]) for i in range(0, len(words), max_length)]
+
+        entities = []
+        sentiments = []
+        summarized_texts = []
+
+        for chunk in chunks:
+            doc = nlp(chunk)
+            entities.extend([(ent.text, ent.label_) for ent in doc.ents])
+            sentiment = self.sentiment_analyzer(chunk)
+            sentiments.append(sentiment)
+            summary = self.summarizer(chunk, max_length=150, min_length=30, do_sample=False)
+            summarized_texts.append(summary[0]['summary_text'])
+
+        return {
+            "entities": entities,
+            "sentiment": sentiments,
+            "summary": " ".join(summarized_texts),
+            "keywords": list(set([token.text for token in nlp(combined_text) 
+                                if token.is_alpha and not token.is_stop]))
+        }
+
+    def generate_response_with_insights(self, query, insights):
         prompt = (
-            f"You are an experienced lawyer in a courtroom setting. "
-            f"Your task is to respond to legal inquiries with precision and authority. "
-            f"The following is the response obtained from previous documents: '{response}'. "
-            f"The question asked is: '{query}'. "
-            f"Now, based on these two pieces of information, generate a coherent and concise legal response. "
-            f"Include the obtained response only if it is relevant to the question; otherwise, provide a concise answer without it. "
-            f"Ensure your response reflects legal expertise and is directed towards an opposing counsel."
+            f"As an AI assistant with legal expertise, respond to: '{query}'.\n"
+            f"If the query is casual, respond warmly. "
+            f"If legal in nature, respond as Alex Mercer, criminal defense attorney.\n"
+            f"Evidence summary: '{insights['summary']}'\n"
+            f"Key entities: {insights['entities']}\n"
+            f"Sentiment: {insights['sentiment']}\n"
+            f"Keywords: {insights['keywords']}"
         )
 
         client = OpenAI(
@@ -162,16 +219,13 @@ class AILawyer(VectorDBMixin):
             api_key=self.llm_config["api_key"]
         )
         
-        # Call the OpenAI ChatCompletion API to generate a response
-        llm_response = client.chat.completions.create(
+        response = client.chat.completions.create(
             model=self.llm_config["model"],
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7  # Increased temperature for more varied responses
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
         )
 
-        return llm_response.choices[0].message.content
+        return response.choices[0].message.content
 
 class HumanLawyer:
     def __init__(self):
@@ -206,40 +260,39 @@ class Judge:
         self.current_turn = None  # Track whose turn it is
 
     def analyze_response(self, response, is_human):
-        """Analyze the response using sentiment, coherence, and NER models."""
-        
-        # Calculate sentiment score (example: positive=1, negative=0)
-        sentiment_result = self.sentiment_analyzer(response)
-        sentiment_score = 1 if sentiment_result[0]['label'] == 'POSITIVE' else 0
-        
-        # Coherence score calculation with respect to previous response
+        """Enhanced response analysis with chunking"""
+        def analyze_in_chunks(text, analyzer):
+            tokens = self.tokenizer.encode(text)
+            if len(tokens) > 500:
+                chunks = [tokens[i:i + 500] for i in range(0, len(tokens), 500)]
+                scores = []
+                for chunk in chunks:
+                    chunk_text = self.tokenizer.decode(chunk, skip_special_tokens=True)
+                    result = analyzer(chunk_text)
+                    scores.append(result[0]['score'])
+                return sum(scores) / len(scores)
+            else:
+                result = analyzer(text)
+                return result[0]['score']
+
+        # Calculate expression score
+        expression_score = analyze_in_chunks(response, self.sentiment_analyzer)
+
+        # Calculate coherence score
         coherence_score = 0
-        if len(self.conversations) > 1:  # Ensure there is a previous response to compare against
-            previous_response = self.conversations[-2].input + self.conversations[-2].context # Get last response text
-            
-            # Combine previous and current responses and ensure they fit within model limits
+        if len(self.conversations) > 1:
+            previous_response = self.conversations[-2].input + self.conversations[-2].context
             coherence_input = f"{previous_response} {response}"
+            coherence_score = analyze_in_chunks(coherence_input, self.coherence_model)
 
-             # Proper token counting and truncation
-            tokens = self.tokenizer.encode(coherence_input)
-            if len(tokens) > 512:  # Check token count (simple word count)
-                coherence_input = self.tokenizer.decode(tokens[:500], skip_special_tokens=True)
-            
-            coherence_result = self.coherence_model(coherence_input)
-            coherence_score = coherence_result[0]['score'] if coherence_result else 0
-        
-        # NER score (count number of entities recognized)
-        ner_result = self.ner_model(response)
-        ner_score = len(ner_result)
+        final_score = (expression_score + coherence_score) / 2
 
-        total_score = sentiment_score + coherence_score + ner_score
-        
         if is_human:
-            self.human_score += total_score
-            return total_score
+            self.human_score += final_score
         else:
-            self.ai_score += total_score
-            return total_score
+            self.ai_score += final_score
+            
+        return final_score
 
     async def start_simulation(self):
         """Initialize a new simulation and return initial state"""
