@@ -48,6 +48,11 @@ JusticeChain represents the convergence of Web3's decentralization with advanced
 ### Tech Partners
 ![TechPartners](https://github.com/user-attachments/assets/62087a98-4217-45e8-b972-0adda005a034)
 
+## Live Demoes
+
+![Drive Link](https://drive.google.com/file/d/1btAe-MqjK6-kD55cXl1a2nbpWDN9sTwY/view?usp=sharing)
+![Drive Link](https://drive.google.com/file/d/1d4KJPZw7hM9xHja7lz5KFeyQh_dC8g4G/view?usp=sharing)
+![Drive Link]()
 
 ## 💡 Core Components
 
