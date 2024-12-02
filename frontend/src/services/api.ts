@@ -56,4 +56,23 @@ export const api = {
     const response = await axios.patch(`${API_BASE_URL}/cases/${caseId}/status`, { status });
     return response.data;
   },
+
+  // HAI specific endpoints
+  startHAISimulation: async (caseId: string) => {
+    const response = await axios.post(`${API_BASE_URL}/api/hai/start-simulation`);
+    return response.data;
+  },
+
+  submitHAIInput: async (input: string) => {
+    const response = await axios.post(`${API_BASE_URL}/api/hai/process-input`, {
+      turn_type: "human",
+      input_text: input
+    });
+    return response.data;
+  },
+
+  getHAIHistory: async (caseId: string) => {
+    const response = await axios.get(`${API_BASE_URL}/api/hai/conversation-history`);
+    return response.data;
+  }
 }; 

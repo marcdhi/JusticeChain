@@ -1,8 +1,10 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from .connection_manager import manager
 from ..schema.schemas import ChatMessageSchema
+from ..human_ai.hai import Judge, ProcessInputRequest
 import json
 from pydantic import ValidationError
+import asyncio
 
 router = APIRouter()
 
@@ -74,52 +76,84 @@ async def websocket_endpoint(websocket: WebSocket, case_id: str, user_address: s
 
 @router.websocket("/ws/hai/{case_id}/{user_address}")
 async def hai_websocket_endpoint(websocket: WebSocket, case_id: str, user_address: str):
-    """
-    WebSocket endpoint specifically for Human-AI courtroom interactions.
-    """
     try:
         await manager.connect(websocket, case_id, user_address)
-        
-        # Initialize HAI components
         judge = Judge()
         
-        # Start simulation and send initial state
-        initial_state = await judge.start_simulation()
-        await websocket.send_json({
-            "type": "state_update",
-            "data": initial_state.dict()
-        })
-        
         try:
-            while True:
-                data = await websocket.receive_json()
+            # Start simulation
+            print("Starting simulation...")
+            initial_state = await judge.start_simulation()
+            print("Initial state:", initial_state.dict())
+            
+            # Send initial judge statement
+            await websocket.send_json({
+                "type": "state_update",
+                "data": initial_state.dict()
+            })
+            
+            # If AI goes first, generate its response after a delay
+            if initial_state.next_turn == "ai":
+                print("AI goes first")
+                await asyncio.sleep(2)
+                ai_response = await judge.process_input(ProcessInputRequest(
+                    turn_type="ai"
+                ))
+                print("AI response:", ai_response.dict())
                 
-                if data["type"] == "human_input":
-                    # Process human input
-                    response = await judge.process_input(ProcessInputRequest(
-                        turn_type="human",
-                        input_text=data["content"]
-                    ))
+                # Send AI's response
+                await websocket.send_json({
+                    "type": "turn_update",
+                    "data": ai_response.dict()
+                })
+                
+                # Get and send judge's comment
+                judge_comment = await judge.process_input(ProcessInputRequest(
+                    turn_type="judge"
+                ))
+                await websocket.send_json({
+                    "type": "turn_update",
+                    "data": judge_comment.dict()
+                })
+            else:
+                print("Human goes first")
+            
+            while True:
+                try:
+                    data = await websocket.receive_json()
                     
-                    # Broadcast response to room
-                    await manager.broadcast_to_room({
-                        "type": "turn_update",
-                        "data": response.dict()
-                    }, case_id)
-                    
-                    # If it's AI's turn, generate AI response
-                    if response.next_turn == "ai" and response.case_status == "open":
-                        ai_response = await judge.process_input(ProcessInputRequest(
-                            turn_type="ai"
+                    if data["type"] == "human_input":
+                        # Process human input and get response
+                        human_response = await judge.process_input(ProcessInputRequest(
+                            turn_type="human",
+                            input_text=data["content"]
                         ))
                         
-                        await manager.broadcast_to_room({
+                        # Send human's response
+                        await websocket.send_json({
                             "type": "turn_update",
-                            "data": ai_response.dict()
-                        }, case_id)
-                
+                            "data": human_response.dict()
+                        })
+                        
+                        # If it's AI's turn and case is open, generate AI response
+                        if human_response.case_status == "open" and human_response.next_turn == "ai":
+                            await asyncio.sleep(2)
+                            ai_response = await judge.process_input(ProcessInputRequest(
+                                turn_type="ai"
+                            ))
+                            
+                            # Send AI's response
+                            await websocket.send_json({
+                                "type": "turn_update",
+                                "data": ai_response.dict()
+                            })
+                    
+                except WebSocketDisconnect:
+                    manager.disconnect(websocket, case_id)
+                    break
+                    
         except WebSocketDisconnect:
             manager.disconnect(websocket, case_id)
             
     except HTTPException as he:
-        await websocket.close(code=1000, reason=str(he.detail)) 
+        await websocket.close(code=he.status_code, reason=str(he.detail)) 

@@ -12,6 +12,7 @@ import { HAI_CreateCase } from './components/HumanAI/HAI_CreateCase';
 import { EvidenceSubmission } from './components/EvidenceSubmission';
 import { CaseReview } from './components/CaseReview';
 import { Courtroom } from './components/Courtroom';
+import { HAICase } from './components/HumanAI/HAICase';
 
 import './App.css'
 
@@ -90,6 +91,7 @@ function AppContent() {
             <Route path="/human-human/case/:caseId/review" element={<CaseReview mode="human-human" />} />
             <Route path="/human-ai/case/:caseId/review" element={<CaseReview mode="human-ai" />} />
             <Route path="/courtroom/:caseId" element={<Courtroom />} />
+            <Route path="/hai-case/:caseId" element={<HAICase />} />
           </Routes>
         </main>
         {user && (
