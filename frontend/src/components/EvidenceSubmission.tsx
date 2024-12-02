@@ -37,6 +37,15 @@ export const EvidenceSubmission: React.FC<EvidenceSubmissionProps> = ({ mode, ro
     fetchCase();
   }, [caseId]);
 
+  const readTxtFile = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.onerror = (e) => reject(e);
+      reader.readAsText(file);
+    });
+  };
+
   const handleAddEvidence = () => {
     setEvidences([...evidences, { file: null as unknown as File, description: '' }]);
   };
@@ -78,11 +87,22 @@ export const EvidenceSubmission: React.FC<EvidenceSubmissionProps> = ({ mode, ro
       // Upload all files to IPFS first
       const evidencePromises = evidences.map(async (evidence) => {
         const ipfsHash = await uploadToPinata(evidence.file);
-        return {
-          ipfs_hash: ipfsHash,
-          description: evidence.description,
-          original_name: evidence.file.name
-        };
+        if(evidence.file.name.split('.')[1] === 'txt'){
+          const description = await readTxtFile(evidence.file);
+          const truncatedDescriptionAndTruncatedEvidence = description.substring(0, 100) + evidence.description;
+          return{
+            ipfs_hash: ipfsHash,
+            description: truncatedDescriptionAndTruncatedEvidence,
+            original_name: evidence.file.name
+          }
+        }else{
+
+          return {
+            ipfs_hash: ipfsHash,
+            description: evidence.description,
+            original_name: evidence.file.name
+          };
+        }
       });
 
       const uploadedEvidences = await Promise.all(evidencePromises);

@@ -97,7 +97,8 @@ async def hai_websocket_endpoint(websocket: WebSocket, case_id: str, user_addres
                 print("AI goes first")
                 await asyncio.sleep(2)
                 ai_response = await judge.process_input(ProcessInputRequest(
-                    turn_type="ai"
+                    turn_type="ai",
+                    case_id = case_id
                 ))
                 print("AI response:", ai_response.dict())
                 
@@ -109,7 +110,8 @@ async def hai_websocket_endpoint(websocket: WebSocket, case_id: str, user_addres
                 
                 # Get and send judge's comment
                 judge_comment = await judge.process_input(ProcessInputRequest(
-                    turn_type="judge"
+                    turn_type="judge",
+                    case_id = case_id
                 ))
                 await websocket.send_json({
                     "type": "turn_update",
@@ -126,7 +128,8 @@ async def hai_websocket_endpoint(websocket: WebSocket, case_id: str, user_addres
                         # Process human input and get response
                         human_response = await judge.process_input(ProcessInputRequest(
                             turn_type="human",
-                            input_text=data["content"]
+                            input_text=data["content"],
+                            case_id=case_id
                         ))
                         
                         # Send human's response
@@ -139,7 +142,8 @@ async def hai_websocket_endpoint(websocket: WebSocket, case_id: str, user_addres
                         if human_response.case_status == "open" and human_response.next_turn == "ai":
                             await asyncio.sleep(2)
                             ai_response = await judge.process_input(ProcessInputRequest(
-                                turn_type="ai"
+                                turn_type="ai",
+                                case_id=case_id
                             ))
                             
                             # Send AI's response

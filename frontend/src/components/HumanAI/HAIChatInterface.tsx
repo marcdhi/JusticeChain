@@ -29,6 +29,7 @@ interface ChatState {
   };
   human_score: number;
   ai_score: number;
+  ipfs_hash?: string;
 }
 
 export const HAIChatInterface = ({ caseId }: { caseId: string }) => {
@@ -42,11 +43,12 @@ export const HAIChatInterface = ({ caseId }: { caseId: string }) => {
   const [isCourtSpeaking, setIsCourtSpeaking] = useState(false);
   
   const { sendMessage, lastMessage, connectionStatus } = useWebSocket(
-    `ws://localhost:8000/ws/hai/${caseId}/${user?.user_id}`
+    `ws://localhost:8000/ws/hai/${caseId}/${user?.id}`
   );
 
   useEffect(() => {
-    if (!user?.user_id) {
+    console.log("User ID:", user?.id);
+    if (!user?.id) {
       setError("User not authenticated");
       return;
     }
@@ -292,6 +294,9 @@ export const HAIChatInterface = ({ caseId }: { caseId: string }) => {
           <div className="text-xl mb-2">Winner: {gameState.winner}</div>
           <div className="text-gray-300">
             Final Score Difference: {gameState.score_difference?.toFixed(2)}
+          </div>
+          <div>
+            <a href={gameState.ipfs_hash} target="_blank" rel="noopener noreferrer">View Case on IPFS</a>
           </div>
         </motion.div>
       )}

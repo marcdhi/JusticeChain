@@ -1,370 +1,477 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { Contract, BrowserProvider, ethers } from 'ethers';
+import { ethers } from 'ethers';
 import axios from 'axios';
+import { useOkto } from 'okto-sdk-react';
 import { CONFIG } from '../config';
-import { getContract } from '../utils/ethereum';
+import JusticeChainABI from '../../../contracts/abi/abi.json';
 
 declare global {
   interface Window {
-    google: any;
     ethereum?: any;
+    google: {
+      accounts: {
+        id: {
+          initialize: (config: { client_id: string; callback: (response: any) => void }) => void;
+          prompt: () => void;
+        };
+      };
+    };
   }
 }
 
 interface AuthContextType {
   isAuthenticated: boolean;
   user: any | null;
+  walletAddress: string | null;
+  balance: string;
   login: () => void;
   logout: () => void;
-  contract: Contract | null;
-  connectWallet: () => Promise<void>;
-  walletConnected: boolean;
-  createEmbeddedWallet: () => Promise<string | null>;
-  getWalletBalance: () => Promise<string>;
   sendTransaction: (to: string, amount: string) => Promise<void>;
-  signMessage: (message: string) => Promise<string>;
+  createWallet: () => Promise<string | null>;
+  getBalance: () => Promise<string>;
+  executeContractTransaction: (transaction: any) => Promise<{ hash: string; wait: () => Promise<any> }>;
+  authMethod: 'google' | 'email' | null;
+  handleEmailAuth: (authToken: string, refreshToken: string) => void;
+  contract: ethers.Contract | null;
+  walletConnected: boolean;
+  connectWallet: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<any | null>(null);
-  const [contract, setContract] = useState<Contract | null>(null);
+  const [user, setUser] = useState<any>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [balance, setBalance] = useState('0');
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const [authMethod, setAuthMethod] = useState<'google' | 'email' | null>(null);
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [walletConnected, setWalletConnected] = useState(false);
-  const [embeddedWalletAddress, setEmbeddedWalletAddress] = useState<string | null>(null);
 
+  const okto = useOkto();
+
+  // Initialize Google Sign-In
   useEffect(() => {
     const initializeGoogle = () => {
-      if (window.google) {
+      if (window.google?.accounts?.id) {
         try {
+          // Clear any existing Google Sign-In state
+          window.google.accounts.id.cancel();
+          
+          // Initialize with proper configuration
           window.google.accounts.id.initialize({
             client_id: CONFIG.GOOGLE_CLIENT_ID,
-            callback: handleGoogleLogin,
+            callback: (response: any) => {
+              if (response.credential) {
+                handleGoogleLogin(response);
+              }
+            },
+            auto_select: false,
+            cancel_on_tap_outside: true
           });
-          console.log('Google Identity Services initialized');
+
+          // Pre-render the button
+          window.google.accounts.id.renderButton(
+            document.createElement('div'),
+            { theme: 'outline', size: 'large' }
+          );
         } catch (error) {
-          console.error('Error initializing Google Identity Services:', error);
+          console.error('Failed to initialize Google Sign-In:', error);
         }
+      } else {
+        setTimeout(initializeGoogle, 100);
       }
     };
 
-    const checkGoogleLoaded = setInterval(() => {
-      if (window.google) {
-        clearInterval(checkGoogleLoaded);
-        initializeGoogle();
-      }
-    }, 100);
+    initializeGoogle();
 
-    return () => clearInterval(checkGoogleLoaded);
+    // Cleanup on unmount
+    return () => {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.cancel();
+      }
+    };
   }, []);
 
-  const connectWallet = async () => {
-    try {
-      if (!window.ethereum) {
-        alert('Please install MetaMask to use this feature!');
-        return;
-      }
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
-      const network = await provider.getNetwork();
-      
-      if (network.chainId !== BigInt(CONFIG.CHAIN_ID)) {
-        alert(`Please connect to the ${CONFIG.NETWORK_NAME} network`);
-        return;
-      }
-
-      const signer = await provider.getSigner();
-      const contractInstance = getContract(signer);
-      setContract(contractInstance);
-      setWalletConnected(true);
-      console.log('Wallet connected and contract setup completed');
-    } catch (error) {
-      console.error('Error connecting wallet:', error);
-      setWalletConnected(false);
-    }
-  };
-
   const handleGoogleLogin = async (response: any) => {
-    console.log('Google login response received:', response);
     try {
-      if (response.credential) {
-        const oktoResponse = await axios.post(
-          `${CONFIG.OKTO_ENDPOINT}/v2/authenticate`,
-          { 
-            id_token: response.credential,
-            provider: 'google'
-          },
-          { 
-            headers: { 
-              'x-api-key': CONFIG.OKTO_APP_SECRET,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            }
-          }
-        );
+      if (!response.credential) {
+        console.log('No credential received, switching to email auth');
+        setAuthMethod('email');
+        return;
+      }
 
-        if (oktoResponse.data?.data?.auth_token) {
-          const auth_token = oktoResponse.data.data.auth_token;
-          localStorage.setItem('oktoToken', auth_token);
-          
-          const userResponse = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/user_from_token`, {
-            headers: { 
-              'Authorization': `Bearer ${auth_token}`,
-              'x-api-key': CONFIG.OKTO_APP_SECRET,
-              'Accept': 'application/json'
-            }
-          });
-          
-          if (userResponse.data?.data) {
-            console.log('User profile loaded after login');
-            setUser(userResponse.data.data);
-            setIsAuthenticated(true);
-          }
+      console.log("Google response received:", response.credential);
+      setGoogleToken(response.credential);
+
+      // Authenticate with Okto
+      const authResponse = await axios.post('https://sandbox-api.okto.tech/api/v2/authenticate', {
+        id_token: response.credential
+      }, {
+        headers: {
+          'X-Api-Key': CONFIG.OKTO_APP_SECRET,
+          'Content-Type': 'application/json'
         }
+      });
+
+      console.log("Okto auth response:", authResponse);
+
+      if (authResponse.data.status === 'success') {
+        const { auth_token, refresh_auth_token } = authResponse.data.data;
+        
+        // Get user info from Okto
+        const userResponse = await axios.get('https://sandbox-api.okto.tech/api/v1/user_from_token', {
+          headers: {
+            'Authorization': `Bearer ${auth_token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        localStorage.setItem('oktoAuthToken', auth_token);
+        localStorage.setItem('oktoRefreshToken', refresh_auth_token);
+        setIsAuthenticated(true);
+        setUser({
+          ...response,
+          id: userResponse.data.data.user_id
+        });
+        setAuthMethod('google');
+      } else {
+        throw new Error('Authentication failed');
       }
     } catch (error) {
       console.error('Login failed:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Error details:', error.response?.data);
-      }
       setIsAuthenticated(false);
-      setUser(null);
+      setAuthMethod('email');
+    }
+  };
+
+  const handleEmailAuth = async (authToken: string, refreshToken: string) => {
+    try {
+      // Save tokens
+      localStorage.setItem('oktoAuthToken', authToken);
+      localStorage.setItem('oktoRefreshToken', refreshToken);
+
+      // Get user info using the auth token
+      const userResponse = await axios.get('https://sandbox-api.okto.tech/api/v1/user_from_token', {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('Okto User Info:', userResponse.data);
+
+      // Set authenticated state
+      setIsAuthenticated(true);
+      setAuthMethod('email');
+      
+      // Set user data with the correct structure
+      setUser({
+        email: userResponse.data.data.email,
+        id: userResponse.data.data.user_id,
+        created_at: userResponse.data.data.created_at
+      });
+
+      // Create wallet for the user
+      const walletAddress = await createWallet();
+      if (walletAddress) {
+        await getBalance();
+      }
+    } catch (error) {
+      console.error('Error setting up user after email auth:', error);
+      throw error;
     }
   };
 
   const login = () => {
-    if (window.google) {
-      window.google.accounts.id.prompt((notification: any) => {
-        if (notification.isNotDisplayed()) {
-          console.error('Login prompt not displayed:', notification.getNotDisplayedReason());
-        } else if (notification.isSkippedMoment()) {
-          console.log('Login prompt skipped:', notification.getSkippedReason());
-        } else {
-          console.log('Login prompt displayed');
-        }
-      });
+    console.log('Login attempt started');
+    
+    if (window.google?.accounts?.id) {
+      try {
+        window.google.accounts.id.prompt((notification: any) => {
+          console.log('Google Sign-In notification:', notification);
+          
+          if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+            console.log('Switching to email auth');
+            setAuthMethod('email');
+          }
+        });
+      } catch (error) {
+        console.error('Google Sign-In error:', error);
+        setAuthMethod('email');
+      }
     } else {
-      console.error('Google Identity Services not loaded');
+      console.log('Google Sign-In not available, using email auth');
+      setAuthMethod('email');
     }
   };
 
   const logout = async () => {
     try {
-      const token = localStorage.getItem('oktoToken');
-      if (token) {
-        await axios.post(
-          `${CONFIG.OKTO_ENDPOINT}/v1/logout`,
-          {},
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'x-api-key': CONFIG.OKTO_APP_SECRET
-            }
-          }
-        );
+      if (okto) {
+        await okto.logOut();
       }
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      localStorage.removeItem('oktoToken');
+      localStorage.removeItem('oktoAuthToken');
+      localStorage.removeItem('oktoRefreshToken');
       setIsAuthenticated(false);
       setUser(null);
-      setContract(null);
-      setWalletConnected(false);
-      setEmbeddedWalletAddress(null);
+      setWalletAddress(null);
+      setBalance('0');
     }
   };
 
-  const createEmbeddedWallet = async (): Promise<string | null> => {
+  const executeContractTransaction = async (transaction: any) => {
     try {
-      const token = localStorage.getItem('oktoToken');
-      if (!token) {
-        throw new Error('User not authenticated');
-      }
+      const auth_token = localStorage.getItem('oktoAuthToken');
+      if (!auth_token) throw new Error('Not authenticated');
+
+      // Convert the value to a smaller amount that's within limits
+      const adjustedValue = (parseFloat(transaction.value) / 100).toString(); // Reduce by 100x
+
+      console.log('Executing contract transaction:', {
+        network_name: 'APTOS_TESTNET',
+        token_address: '',
+        quantity: adjustedValue,
+        recipient_address: transaction.to
+      });
 
       const response = await axios.post(
-        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/create`,
+        'https://sandbox-api.okto.tech/api/v1/transfer/tokens/execute',
+        {
+          network_name: 'APTOS_TESTNET',
+          token_address: '', // Empty string for native token
+          quantity: adjustedValue,
+          recipient_address: transaction.to
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${auth_token}`,
+            'Content-Type': 'application/json',
+            'X-Api-Key': CONFIG.OKTO_APP_SECRET // Add back the API key
+          }
+        }
+      );
+
+      console.log('Transfer response:', response.data);
+
+      if (response.data.status === 'success') {
+        const orderId = response.data.data.orderId;
+        return {
+          hash: orderId,
+          wait: async () => {
+            const status = response.data.status;
+            return status;
+          }
+        };
+      }
+
+      // If we get here, handle the error response
+      if (response.data.error) {
+        const error = response.data.error;
+        throw new Error(error.details || error.message || 'Transaction failed');
+      }
+
+      throw new Error('Contract transaction failed');
+    } catch (error: any) {
+      // Better error handling
+      if (error.response?.data?.error) {
+        const apiError = error.response.data.error;
+        console.error('API Error:', apiError);
+        throw new Error(apiError.details || apiError.message || 'Transaction failed');
+      }
+      console.error('Contract transaction failed:', error);
+      throw error;
+    }
+  };
+
+  const createWallet = async (): Promise<string | null> => {
+    try {
+      const auth_token = localStorage.getItem('oktoAuthToken');
+      if (!auth_token) throw new Error('Not authenticated');
+
+      const response = await axios.post(
+        'https://sandbox-api.okto.tech/api/v1/wallet',
         {},
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': CONFIG.OKTO_APP_SECRET,
-            'Accept': 'application/json'
+            'Authorization': `Bearer ${auth_token}`
           }
         }
       );
 
-      if (response.data?.data?.address) {
-        setEmbeddedWalletAddress(response.data.data.address);
-        console.log('Embedded wallet created:', response.data.data.address);
-        return response.data.data.address;
+      if (response.data.status === 'success') {
+        const wallet = response.data.data.wallets[0];
+        if (wallet && wallet.success) {
+          setWalletAddress(wallet.address);
+          return wallet.address;
+        }
       }
+
       return null;
     } catch (error) {
-      console.error('Error creating embedded wallet:', error);
+      console.error('Error creating wallet:', error);
       return null;
     }
   };
 
-  const getWalletBalance = async (): Promise<string> => {
+  const getBalance = async (): Promise<string> => {
     try {
-      const token = localStorage.getItem('oktoToken');
-      if (!token || !embeddedWalletAddress) {
-        throw new Error('User not authenticated or embedded wallet not created');
-      }
+      const auth_token = localStorage.getItem('oktoAuthToken');
+      if (!auth_token) throw new Error('Not authenticated');
 
-      const response = await axios.get(
-        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/balance`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': CONFIG.OKTO_APP_SECRET,
-            'Accept': 'application/json'
-          }
+      const response = await axios.get('https://sandbox-api.okto.tech/api/v1/portfolio', {
+        headers: {
+          Authorization: `Bearer ${auth_token}`
         }
-      );
+      });
 
-      if (response.data?.data?.balance) {
-        return ethers.formatEther(response.data.data.balance);
+      if (response.data.status === 'success') {
+        const portfolio = response.data.data;
+        const token = portfolio.tokens.find((t: any) => 
+          t.network_name === 'APTOS_TESTNET' && 
+          t.token_name === 'APT_TESTNET'
+        );
+        
+        if (token) {
+          setBalance(token.quantity);
+          return token.quantity;
+        }
       }
+
       return '0';
     } catch (error) {
-      console.error('Error getting wallet balance:', error);
+      console.error('Error getting balance:', error);
       return '0';
     }
   };
 
   const sendTransaction = async (to: string, amount: string) => {
     try {
-      const token = localStorage.getItem('oktoToken');
-      if (!token || !embeddedWalletAddress) {
-        throw new Error('User not authenticated or embedded wallet not created');
-      }
+      const auth_token = localStorage.getItem('oktoAuthToken');
+      if (!auth_token) throw new Error('Not authenticated');
 
       const response = await axios.post(
-        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/send`,
+        'https://sandbox-api.okto.tech/api/v1/transfer/tokens/execute',
         {
-          to,
-          amount: ethers.parseEther(amount).toString(),
+          network_name: CONFIG.NETWORK_NAME,
+          token_address: "", // Empty for native token
+          quantity: amount,
+          recipient_address: to
         },
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': CONFIG.OKTO_APP_SECRET,
-            'Accept': 'application/json'
+            'Authorization': `Bearer ${auth_token}`,
+            'Content-Type': 'application/json',
+            'X-Api-Key': CONFIG.OKTO_APP_SECRET
           }
         }
       );
 
-      console.log('Transaction sent:', response.data);
-    } catch (error) {
-      console.error('Error sending transaction:', error);
-      throw error;
-    }
-  };
-
-  const signMessage = async (message: string): Promise<string> => {
-    try {
-      const token = localStorage.getItem('oktoToken');
-      if (!token || !embeddedWalletAddress) {
-        throw new Error('User not authenticated or embedded wallet not created');
+      if (response.data.status === 'success') {
+        await getBalance(); // Refresh balance
+        return response.data.data.orderId;
       }
-
-      const response = await axios.post(
-        `${CONFIG.OKTO_ENDPOINT}/v1/wallet/${embeddedWalletAddress}/sign`,
-        { message },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'x-api-key': CONFIG.OKTO_APP_SECRET,
-            'Accept': 'application/json'
-          }
-        }
-      );
-
-      if (response.data?.data?.signature) {
-        return response.data.data.signature;
-      }
-      throw new Error('Failed to sign message');
-    } catch (error) {
-      console.error('Error signing message:', error);
-      throw error;
-    }
-  };
-
-  useEffect(() => {
-    const checkAuth = async () => {
-      const token = localStorage.getItem('oktoToken');
-      console.log("Checking auth with token:", token ? 'exists' : 'not found');
       
-      if (token) {
-        try {
-          const response = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/user_from_token`, {
-            headers: { 
-              'Authorization': `Bearer ${token}`,
-              'x-api-key': CONFIG.OKTO_APP_SECRET,
-              'Accept': 'application/json'
-            }
-          });
-          
-          if (response.data?.data) {
-            console.log('User profile loaded:', response.data.data);
-            setUser(response.data.data);
-            setIsAuthenticated(true);
-            
-            // Check for existing embedded wallet
-            const walletResponse = await axios.get(`${CONFIG.OKTO_ENDPOINT}/v1/wallet`, {
-              headers: { 
-                'Authorization': `Bearer ${token}`,
-                'x-api-key': CONFIG.OKTO_APP_SECRET,
-                'Accept': 'application/json'
-              }
-            });
-            
-            if (walletResponse.data?.data?.address) {
-              setEmbeddedWalletAddress(walletResponse.data.data.address);
-            }
+      throw new Error('Transaction failed');
+    } catch (error) {
+      console.error('Transaction failed:', error);
+      throw error;
+    }
+  };
 
-            if (window.ethereum) {
-              try {
-                const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-                if (accounts.length > 0) {
-                  await connectWallet();
-                }
-              } catch (error) {
-                console.error('Error checking wallet connection:', error);
-              }
-            }
-          }
+  const connectWallet = async () => {
+    try {
+      if (!window.ethereum) {
+        alert('Please install MetaMask!');
+        return;
+      }
+
+      // Request account access
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      console.log('Connected accounts:', accounts);
+      
+      // Create Web3 provider
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // Get network to ensure we're on Sepolia
+      const network = await provider.getNetwork();
+      console.log('Connected to network:', network.name);
+      
+      // Check if we're on Sepolia
+      if (network.chainId !== 11155111n) { // Sepolia chainId
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0xaa36a7' }], // Sepolia chainId in hex
+          });
         } catch (error) {
-          console.error('Error checking authentication:', error);
-          if (axios.isAxiosError(error)) {
-            console.error('API Error details:', error.response?.data);
-          }
-          localStorage.removeItem('oktoToken');
-          setIsAuthenticated(false);
-          setUser(null);
+          console.error('Failed to switch network:', error);
+          alert('Please switch to Sepolia network in MetaMask');
+          return;
         }
       }
-    };
-    checkAuth();
-  }, []);
+
+      const signer = await provider.getSigner();
+      console.log('Got signer address:', await signer.getAddress());
+
+      // Initialize contract with signer
+      const contractInstance = new ethers.Contract(
+        CONFIG.CONTRACT_ADDRESS,
+        JusticeChainABI,
+        signer
+      );
+
+      // Verify contract connection
+      try {
+        const caseCount = await contractInstance.cases(0);
+        console.log('Successfully connected to contract. First case:', caseCount);
+      } catch (error) {
+        console.error('Error verifying contract connection:', error);
+      }
+
+      console.log('Contract initialized at:', contractInstance.address);
+      setContract(contractInstance);
+      setWalletConnected(true);
+
+      // Listen for account changes
+      window.ethereum.on('accountsChanged', () => {
+        window.location.reload();
+      });
+
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      throw error;
+    }
+  };
+
+  // Initialize contract when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      connectWallet().catch(console.error);
+    }
+  }, [isAuthenticated]);
 
   return (
-    <AuthContext.Provider value={{ 
-      isAuthenticated, 
-      user, 
-      login, 
-      logout, 
-      contract, 
-      connectWallet,
-      walletConnected,
-      createEmbeddedWallet,
-      getWalletBalance,
+    <AuthContext.Provider value={{
+      isAuthenticated,
+      user,
+      walletAddress,
+      balance,
+      login,
+      logout,
       sendTransaction,
-      signMessage
+      createWallet,
+      getBalance,
+      executeContractTransaction,
+      authMethod,
+      handleEmailAuth,
+      contract,
+      walletConnected,
+      connectWallet
     }}>
       {children}
     </AuthContext.Provider>
@@ -373,8 +480,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };

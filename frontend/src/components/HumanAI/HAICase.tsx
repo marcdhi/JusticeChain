@@ -58,7 +58,7 @@ export const HAICase = () => {
   }
 
   // Only allow access if user is lawyer1
-  if (user?.user_id !== caseData.lawyer1_address) {
+  if (user?.id !== caseData.lawyer1_address) {
     return (
       <div className="max-w-4xl mx-auto mt-10 p-6">
         <Card>

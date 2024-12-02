@@ -1,4 +1,5 @@
 import { CreateCase } from '../CreateCase';
+
 export const HH_CreateCase = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-8 p-6">
@@ -10,3 +11,4 @@ export const HH_CreateCase = () => {
     </div>
   );
 };
+  

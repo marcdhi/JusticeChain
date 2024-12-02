@@ -13,6 +13,12 @@ import { EvidenceSubmission } from './components/EvidenceSubmission';
 import { CaseReview } from './components/CaseReview';
 import { Courtroom } from './components/Courtroom';
 import { HAICase } from './components/HumanAI/HAICase';
+import { OktoProvider } from 'okto-sdk-react';
+import { CONFIG } from './config';
+import { Web3Wallet } from './components/Web3Wallet';
+import { EmailAuth } from './components/EmailAuth'
+import { Loader2 } from 'lucide-react'
+import { useState } from 'react';
 
 import './App.css'
 
@@ -37,45 +43,88 @@ function NavLink({ to, children, className = '' }: NavLinkProps) {
 }
 
 function AppContent() {
-  const { user, login, logout } = useAuth();
+  const { user, login, logout, authMethod, handleEmailAuth } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.MouseEvent) => {
+  const handleLogin = async (e: React.MouseEvent) => {
     e.preventDefault();
-    login();
+    setIsLoading(true);
+    try {
+      await login();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="flex flex-col min-h-screen w-screen bg-gray-50">
-      <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <Link 
-              to="/" 
-              className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
-            >
-              JusticeChain
-            </Link>
-            <div className="flex items-center gap-6">
+    <div className="flex flex-col min-h-screen bg-gray-50">
+    {/* Navbar */}
+    <nav className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container mx-auto px-4">
+        <div className="flex h-16 items-center justify-between">
+          {/* Logo */}
+          <Link 
+            to="/" 
+            className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent"
+          >
+            JusticeChain
+          </Link>
+
+          {/* Navigation Links and Actions */}
+          <div className="flex items-center space-x-4">
+            <div className="hidden md:flex items-center space-x-6">
               <NavLink to="/cases" className="font-medium">
                 Cases
               </NavLink>
+              {user && (
+                <Button asChild variant="ghost">
+                  <Link to="/create-case">Create Case</Link>
+                </Button>
+              )}
+            </div>
+
+            {/* Auth and Wallet Section */}
+            <div className="flex items-center space-x-2">
               {user ? (
                 <>
-                  {/* <Button asChild variant="default">
-                    <Link to="/create-case">Create Case</Link>
-                  </Button> */}
-                  <Button onClick={logout} variant="outline">Logout</Button>
+                  <Web3Wallet />
+                  <div className="h-6 w-px bg-gray-200" /> {/* Divider */}
+                  <Button 
+                    onClick={logout} 
+                    variant="outline"
+                    size="sm"
+                    className="text-sm"
+                  >
+                    Logout
+                  </Button>
                 </>
               ) : (
-                <Button onClick={handleLogin} variant="default">Login</Button>
+                <Button 
+                  onClick={handleLogin} 
+                  variant="default"
+                  size="sm"
+                  className="text-sm"
+                >
+                  Login
+                </Button>
               )}
             </div>
           </div>
         </div>
-      </nav>
+      </div>
+    </nav>
 
-      <div className="flex-grow w-full flex">
-        <main className="flex-grow p-6">
+    
+    
+      <main className="flex-grow container mx-auto p-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="w-8 h-8 animate-spin" />
+          </div>
+        ) : authMethod === 'email' && !user ? (
+          <EmailAuth onSuccess={handleEmailAuth} />
+        ) : (
+
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/cases" element={<Cases />} />
@@ -92,25 +141,26 @@ function AppContent() {
             <Route path="/human-ai/case/:caseId/review" element={<CaseReview mode="human-ai" />} />
             <Route path="/courtroom/:caseId" element={<Courtroom />} />
             <Route path="/hai-case/:caseId" element={<HAICase />} />
-          </Routes>
-        </main>
-        {user && (
-          <aside className="w-1/3 p-6 border-l">
-            <OktoDashboard />
-          </aside>
+            </Routes>
         )}
-      </div>
+      </main>
+ 
     </div>
   )
 }
 
 function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
-    </AuthProvider>
+    <OktoProvider 
+      apiKey={CONFIG.OKTO_APP_SECRET}
+      buildType="SANDBOX"
+    >
+      <AuthProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </AuthProvider>
+    </OktoProvider>
   )
 }
 

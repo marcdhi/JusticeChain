@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     llm_model_name: str
     galadriel_api_key: str
     galadriel_base_url: str
+    openai_api_key: str
+    pinata_api_key: str
+    pinata_secret_api_key: str
 
     class Config:
         env_file = ".env"

@@ -6,7 +6,7 @@ A FastAPI-based backend for the JusticeChain platform using Redis Stack.
 
 1. Create a virtual environment:
    ```bash
-   python -m venv venv
+   python -m venv venv # or python3 -m venv venv
    source venv/bin/activate  # On Windows use: venv\Scripts\activate
    ```
 

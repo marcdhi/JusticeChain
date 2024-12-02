@@ -10,5 +10,15 @@ export const CONFIG = {
   PINATA_GATEWAY: "https://gateway.pinata.cloud",
   CHAIN_ID: "11155111", // Sepolia testnet
   NETWORK_NAME: "Sepolia",
+  OKTO_APP_ID: import.meta.env.VITE_OKTO_APP_ID!,
+  BASE: {
+    CHAIN_ID: "8453", // Base testnet
+    NETWORK_NAME: "BASE",
+    NETWORK_URL: import.meta.env.VITE_BASE_TESTNET_NETWORK_URL!,
+  },
+  APTOS_TESTNET: {
+    CHAIN_ID: "2", // Aptos testnet
+    NETWORK_NAME: "APTOS_TESTNET",
+    NETWORK_URL: import.meta.env.VITE_APTOS_TESTNET_NETWORK_URL!,
+  },
 };
-

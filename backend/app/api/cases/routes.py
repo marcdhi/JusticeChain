@@ -1,12 +1,29 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 import uuid
-import os
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+
+
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.platypus import (
+    SimpleDocTemplate, 
+    Spacer, 
+    Table, 
+    TableStyle,
+    KeepTogether
+)
+from reportlab.platypus.para import Paragraph
+from reportlab.platypus.flowables import KeepTogether
+import os
+
+
+
+file_path = r'../content-verification/case.txt'
+reference_path = r'../content-verification/references'
+
+
 
 from ...schema.schemas import (
     CaseCreateSchema, 
@@ -18,9 +35,10 @@ from ...db.redis_db import redis_client
 
 router = APIRouter()
 
+
 def generate_case_pdf(case: dict) -> str:
     """
-    Generate a PDF report for a specific case
+    Generate a PDF report for a specific case with improved text handling
     
     Args:
         case (dict): Case object containing all case details
@@ -37,6 +55,11 @@ def generate_case_pdf(case: dict) -> str:
     # Create PDF document
     doc = SimpleDocTemplate(pdf_filename, pagesize=letter)
     styles = getSampleStyleSheet()
+    
+    # Custom style for wrapping text
+    wrap_style = styles['Normal'].clone('WrapStyle')
+    wrap_style.wordWrap = 'CJK'
+    
     story = []
 
     # Title
@@ -46,22 +69,62 @@ def generate_case_pdf(case: dict) -> str:
 
     # Case Details Section
     story.append(Paragraph("Case Details:", styles['Heading2']))
-    case_details = [
-        ['Case ID', case['case_id']],
-        ['Description', case['description']],
-        ['Status', case['case_status']],
-        ['Created At', case['created_at']],
-        ['Updated At', case['updated_at']]
+    
+    def safe_paragraph(text, style, max_length=None, field_type=None):
+        """
+        Helper function to handle None values, truncate text, and create paragraphs
+        
+        Args:
+            text: The text to process
+            style: The paragraph style to apply
+            max_length: Maximum length before truncation
+            field_type: Type of field to determine default max_length
+        """
+        if text is None:
+            return Paragraph("...", style)
+            
+        text = str(text)
+        
+        # Set default max lengths based on field type
+        if max_length is None:
+            if field_type == 'ipfs_hash':
+                max_length = 40
+            elif field_type == 'description':
+                max_length = 200
+            elif field_type == 'address':
+                max_length = 42
+            else:
+                max_length = 50
+                
+        if len(text) > max_length:
+            text = text[:max_length] + "..."
+            
+        return Paragraph(text, style)
+    
+    # Case Details
+    case_details_data = [
+        [Paragraph('Case ID', styles['Heading4']), safe_paragraph(case['case_id'], wrap_style, field_type='id')],
+        [Paragraph('Description', styles['Heading4']), safe_paragraph(case['description'], wrap_style, field_type='description')],
+        [Paragraph('Status', styles['Heading4']), safe_paragraph(case['case_status'], wrap_style)],
+        [Paragraph('Created At', styles['Heading4']), safe_paragraph(case['created_at'], wrap_style)],
+        [Paragraph('Updated At', styles['Heading4']), safe_paragraph(case['updated_at'], wrap_style)]
     ]
-    case_details_table = Table(case_details, colWidths=[2*inch, 4*inch])
+    
+    # Create table with auto-adjusting column widths
+    case_details_table = Table(
+        case_details_data, 
+        colWidths=[1.5*inch, 5.5*inch],  # Adjusted column widths
+        repeatRows=1
+    )
     case_details_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (0,-1), colors.grey),
         ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
-        ('BACKGROUND', (0,0), (-1,0), colors.beige),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('BACKGROUND', (1,0), (1,0), colors.beige),
         ('GRID', (0,0), (-1,-1), 1, colors.black)
     ]))
     story.append(case_details_table)
@@ -70,14 +133,19 @@ def generate_case_pdf(case: dict) -> str:
     # Lawyer 1 Section
     story.append(Paragraph("Lawyer 1 Details:", styles['Heading2']))
     lawyer1_details = [
-        ['Lawyer Type', case['lawyer1_type']],
-        ['Lawyer Address', case['lawyer1_address']]
+        [Paragraph('Lawyer Type', styles['Heading4']), safe_paragraph(case['lawyer1_type'], wrap_style)],
+        [Paragraph('Lawyer Address', styles['Heading4']), safe_paragraph(case['lawyer1_address'], wrap_style, field_type='address')]
     ]
-    lawyer1_table = Table(lawyer1_details, colWidths=[2*inch, 4*inch])
+    lawyer1_table = Table(
+        lawyer1_details, 
+        colWidths=[1.5*inch, 5.5*inch],
+        repeatRows=1
+    )
     lawyer1_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (0,-1), colors.grey),
         ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,-1), 10),
         ('GRID', (0,0), (-1,-1), 1, colors.black)
@@ -87,18 +155,30 @@ def generate_case_pdf(case: dict) -> str:
 
     # Lawyer 1 Evidence
     story.append(Paragraph("Lawyer 1 Evidence:", styles['Heading3']))
-    lawyer1_evidence_data = [['IPFS Hash', 'Description', 'Original Name', 'Submitted At']]
+    lawyer1_evidence_data = [[
+        Paragraph('IPFS Hash', styles['Heading4']), 
+        Paragraph('Description', styles['Heading4']), 
+        Paragraph('Original Name', styles['Heading4']), 
+        Paragraph('Submitted At', styles['Heading4'])
+    ]]
+    
     for evidence in case.get('lawyer1_evidences', []):
         lawyer1_evidence_data.append([
-            evidence['ipfs_hash'], 
-            evidence['description'], 
-            evidence['original_name'],
-            evidence['submitted_at']
+            safe_paragraph(evidence['ipfs_hash'], wrap_style, field_type='ipfs_hash'),
+            safe_paragraph(evidence['description'], wrap_style, field_type='description'),
+            safe_paragraph(evidence['original_name'], wrap_style),
+            safe_paragraph(evidence['submitted_at'], wrap_style)
         ])
-    lawyer1_evidence_table = Table(lawyer1_evidence_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+    
+    lawyer1_evidence_table = Table(
+        lawyer1_evidence_data, 
+        colWidths=[1.5*inch, 2*inch, 1.5*inch, 1*inch],
+        repeatRows=1
+    )
     lawyer1_evidence_table.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.beige),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ('FONTSIZE', (0,0), (-1,-1), 10),
         ('GRID', (0,0), (-1,-1), 1, colors.black)
@@ -110,14 +190,19 @@ def generate_case_pdf(case: dict) -> str:
     if case['lawyer2_type']:
         story.append(Paragraph("Lawyer 2 Details:", styles['Heading2']))
         lawyer2_details = [
-            ['Lawyer Type', case['lawyer2_type']],
-            ['Lawyer Address', case['lawyer2_address']]
+            [Paragraph('Lawyer Type', styles['Heading4']), safe_paragraph(case['lawyer2_type'], wrap_style)],
+            [Paragraph('Lawyer Address', styles['Heading4']), safe_paragraph(case['lawyer2_address'], wrap_style, field_type='address')]
         ]
-        lawyer2_table = Table(lawyer2_details, colWidths=[2*inch, 4*inch])
+        lawyer2_table = Table(
+            lawyer2_details, 
+            colWidths=[1.5*inch, 5.5*inch],
+            repeatRows=1
+        )
         lawyer2_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (0,-1), colors.grey),
             ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTSIZE', (0,0), (-1,-1), 10),
             ('GRID', (0,0), (-1,-1), 1, colors.black)
@@ -127,18 +212,30 @@ def generate_case_pdf(case: dict) -> str:
 
         # Lawyer 2 Evidence
         story.append(Paragraph("Lawyer 2 Evidence:", styles['Heading3']))
-        lawyer2_evidence_data = [['IPFS Hash', 'Description', 'Original Name', 'Submitted At']]
+        lawyer2_evidence_data = [[
+            Paragraph('IPFS Hash', styles['Heading4']), 
+            Paragraph('Description', styles['Heading4']), 
+            Paragraph('Original Name', styles['Heading4']), 
+            Paragraph('Submitted At', styles['Heading4'])
+        ]]
+        
         for evidence in case.get('lawyer2_evidences', []):
             lawyer2_evidence_data.append([
-                evidence['ipfs_hash'], 
-                evidence['description'], 
-                evidence['original_name'],
-                evidence['submitted_at']
+                safe_paragraph(evidence['ipfs_hash'], wrap_style, field_type='ipfs_hash'),
+                safe_paragraph(evidence['description'], wrap_style, field_type='description'),
+                safe_paragraph(evidence['original_name'], wrap_style),
+                safe_paragraph(evidence['submitted_at'], wrap_style)
             ])
-        lawyer2_evidence_table = Table(lawyer2_evidence_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+        
+        lawyer2_evidence_table = Table(
+            lawyer2_evidence_data, 
+            colWidths=[1.5*inch, 2*inch, 1.5*inch, 1*inch],
+            repeatRows=1
+        )
         lawyer2_evidence_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.beige),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTSIZE', (0,0), (-1,-1), 10),
             ('GRID', (0,0), (-1,-1), 1, colors.black)
@@ -167,8 +264,18 @@ async def list_cases():
 async def create_case(case_data: CaseCreateSchema):
     """Creates a new case with initial evidence"""
     try:
-        case_id = str(uuid.uuid4())
+        os.makedirs('content-verification', exist_ok=True)
+        file_path = os.path.join('content-verification', 'case.txt')
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(case_data.description)
         
+        for file in case_data.files:
+            os.makedirs('content-verification/references', exist_ok=True)
+            reference_file_path = os.path.join('content-verification/references', f"{file.original_name.split('.')[0]}.txt")
+            with open(reference_file_path, 'w', encoding='utf-8') as f:
+                f.write(file.description)
+
+        case_id = str(uuid.uuid4())
         case_obj = {
             "case_id": case_id,
             "title": case_data.title,
@@ -193,6 +300,7 @@ async def create_case(case_data: CaseCreateSchema):
         }
         
         saved_case = redis_client.create_case(case_id, case_obj)
+        print(saved_case)
         generate_case_pdf(case_obj)
         
         return saved_case
@@ -210,6 +318,12 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
+    for file in evidence_data.evidences:
+        os.makedirs('content-verification/references', exist_ok=True)
+        reference_file_path = os.path.join('content-verification/references', f"{file.original_name.split('.')[0]}.txt")
+        with open(reference_file_path, 'w', encoding='utf-8') as f:
+            f.write(file.description)
+
     evidence_with_timestamp = [
         {
             "ipfs_hash": evidence.ipfs_hash,
@@ -254,6 +368,10 @@ async def submit_evidence(case_id: str, evidence_data: EvidenceSubmissionSchema)
     
     updated_case = redis_client.update_case(case_id, case)
     generate_case_pdf(case)
+
+
+
+
     
     return updated_case
 

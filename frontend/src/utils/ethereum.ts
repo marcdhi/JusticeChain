@@ -493,3 +493,4 @@ export const getEthereumProvider = () => {
 export const getContract = (signer: ethers.Signer) => {
   return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, contractABI, signer);
 };
+

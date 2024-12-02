@@ -3,19 +3,23 @@ import { useAuth } from '../contexts/AuthContext'
 import { Input } from "./ui/input"
 import { Button } from "./ui/button"
 import { Textarea } from "./ui/textarea"
+import fs from 'fs'
+import path from 'path'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./ui/card"
 import { api } from '../services/api'
 import { useNavigate } from 'react-router-dom'
+import { showToast } from './ui/toast'
+import { ethers } from 'ethers'
 
 export interface CreateCaseProps {
-  mode: 'human-human' | 'human-ai';
+  mode: 'human-human' | 'human-ai'; 
 }
 
 type Stage = 'create' | 'evidence' | 'review';
 
 export const CreateCase: React.FC<CreateCaseProps> = ({ mode }) => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, contract, walletConnected, connectWallet } = useAuth();
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<Stage>('create');
   const [createdCase, setCreatedCase] = useState<any>(null);
@@ -23,30 +27,154 @@ export const CreateCase: React.FC<CreateCaseProps> = ({ mode }) => {
     title: '',
     description: '',
   });
+  const [ipfsHash, setIpfsHash] = useState<string>('');
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setCaseData(prev => ({ ...prev, [name]: value }));
   };
 
+  const handleFileRead = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        // truncate to 100 characters
+        const truncatedText = text.substring(0, 400);
+        // Overwrite state
+        setCaseData(prev => ({
+          ...prev,
+          description: truncatedText
+        }));
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const uploadToChain = async (caseDetails: any) => {
+    try {
+      if (!contract) {
+        throw new Error('Contract not initialized');
+      }
+
+      showToast({
+        title: "Preparing Upload",
+        description: "Getting ready to upload case details to blockchain",
+      });
+
+      const transaction = await contract.createCase(
+        user?.id || '', // name
+        caseDetails.title,
+        caseDetails.description,
+        ipfsHash, // IPFS hash
+        ethers.ZeroAddress, // defendant
+        mode === 'human-human' ? 0 : 1, // plaintiffLawyerType
+        mode === 'human-human' ? 0 : 1, // defendantLawyerType
+        {
+          value: ethers.parseEther('0.01'), // Escrow amount
+          gasLimit: 500000 // Gas limit for Sepolia
+        }
+      );
+
+      showToast({
+        title: "Transaction Sent",
+        description: `Transaction hash: ${transaction.hash}`,
+        variant: "success"
+      });
+
+      const receipt = await transaction.wait();
+
+      showToast({
+        title: "Transaction Confirmed",
+        description: "Your case has been successfully uploaded to the blockchain",
+        variant: "success"
+      });
+
+      return receipt;
+    } catch (error) {
+      showToast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Failed to upload to blockchain",
+        variant: "destructive"
+      });
+      throw error;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const caseCreateData = {
+      if (!walletConnected) {
+        showToast({
+          title: "Connecting Wallet",
+          description: "Please approve the connection request",
+        });
+        await connectWallet();
+      }
+
+      if (!contract) {
+        throw new Error('Please connect your wallet first');
+      }
+
+      showToast({
+        title: "Uploading to IPFS",
+        description: "Preparing your case data...",
+      });
+
+      const ipfsResult = await uploadToIPFS({
+        title: caseData.title,
+        description: caseData.description,
+        mode: mode,
+        timestamp: Date.now()
+      });
+      setIpfsHash(ipfsResult.hash);
+
+      showToast({
+        title: "IPFS Upload Complete",
+        description: `IPFS Hash: ${ipfsResult.hash}`,
+        variant: "success"
+      });
+
+      showToast({
+        title: "Uploading to Blockchain",
+        description: "Please confirm the transaction in your wallet",
+      });
+
+      const receipt = await uploadToChain({
+        title: caseData.title,
+        description: caseData.description
+      });
+
+      const newCase = await api.createCase({
         title: caseData.title,
         description: caseData.description,
         files: [], 
         lawyer1_type: 'Human' as const,
-        lawyer1_address: user?.user_id || '',
+        lawyer1_address: user?.id || '',
         case_status: 'Open' as const,
-        mode: mode
-      };
+        mode: mode,
+        transaction_hash: receipt.hash,
+        ipfs_hash: ipfsResult.hash
+      } as any);
 
-      const newCase = await api.createCase(caseCreateData);
       setCreatedCase(newCase);
       setStage('evidence');
+
+      showToast({
+        title: "Case Created Successfully",
+        description: "You can now proceed to add evidence",
+        variant: "success"
+      });
+
+
     } catch (error) {
+      showToast({
+        title: "Error Creating Case",
+        description: error instanceof Error ? error.message : "Failed to create case",
+        variant: "destructive"
+      });
       console.error('Error creating case:', error);
     } finally {
       setLoading(false);
@@ -153,16 +281,28 @@ export const CreateCase: React.FC<CreateCaseProps> = ({ mode }) => {
               required 
             />
           </div>
-          <div>
-            <Textarea 
-              id="description" 
-              name="description" 
-              placeholder="Case Description" 
-              value={caseData.description} 
-              onChange={handleInputChange} 
-              required 
-            />
-          </div>
+          <div className="mt-4">
+    <label 
+      htmlFor="file-upload" 
+      className="block text-sm font-medium text-gray-700 mb-2"
+    >
+      Upload Description File
+    </label>
+    <input
+      id="file-upload"
+      type="file"
+      accept=".txt"
+      onChange={handleFileRead}
+      className="block w-full text-sm text-gray-500
+        file:mr-4 file:py-2 file:px-4
+        file:rounded-full file:border-0
+        file:text-sm file:font-semibold
+        file:bg-blue-50 file:text-blue-700
+        hover:file:bg-blue-100
+        cursor-pointer border rounded-lg
+        p-2"
+    />
+  </div>
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? 'Creating Case...' : 'Create Case'}
           </Button>
@@ -199,7 +339,10 @@ export const CreateCase: React.FC<CreateCaseProps> = ({ mode }) => {
         </Button>
         <Button 
           onClick={() => {
-            // Handle final IPFS submission here
+            showToast({
+              title: "Submitting to IPFS",
+              description: "Your case is being submitted to IPFS...",
+            });
           }}
         >
           Submit to IPFS
